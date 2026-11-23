@@ -1,0 +1,30 @@
+version: '3'
+
+tasks:
+  server:test:
+    dir: server
+    cmds:
+      - go test -race ./...
+      - go vet ./...
+
+  server:build:
+    dir: server
+    cmds:
+      - go build -o ../bin/pi-remote-server ./cmd/pi-remote-server
+
+  ext:check:
+    dir: extension
+    cmds:
+      - npm run check
+
+  e2e:
+    deps: [server:build]
+    cmds:
+      - ./extension/node_modules/.bin/jiti scripts/e2e.mjs
+
+  check:
+    cmds:
+      - task: server:test
+      - task: server:build
+      - task: ext:check
+      - task: e2e

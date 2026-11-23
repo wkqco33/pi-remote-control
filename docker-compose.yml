@@ -1,0 +1,9 @@
+services:
+  pi-remote-server:
+    build: .
+    ports:
+      - "8787:8787"
+    environment:
+      PI_REMOTE_ADDR: ":8787"
+      PI_REMOTE_SERVER_TOKEN: "${PI_REMOTE_SERVER_TOKEN:?PI_REMOTE_SERVER_TOKEN is required}"
+    restart: unless-stopped
