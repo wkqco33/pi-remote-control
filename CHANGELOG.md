@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.2 - 2026-11-23
+- `pi` 확장 설정에 `tokenFile` 및 `PI_REMOTE_SERVER_TOKEN_FILE` 지원 추가 (환경변수 우선, 평문 및 `{"token": "..."}` JSON 지원, `0600` 권한 점검)
+
 ## 0.1.1 - 2026-11-23
 - npm 스코프 패키지명(`@wkqco33/pi-remote-control`) 적용 및 CI/Trusted Publishing 배포 파이프라인 정비
 

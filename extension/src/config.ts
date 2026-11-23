@@ -8,6 +8,7 @@ import type { RemoteToolApproval, RemoteToolPolicy } from "./core/tool-policy.js
 export interface RemoteControlConfig {
 	readonly serverUrl: string;
 	readonly tokenEnv: string;
+	readonly tokenFile?: string;
 	readonly requirePairing: boolean;
 	readonly pairingTtlMs: number;
 	readonly pairingDigits: number;
@@ -59,6 +60,9 @@ export function parseRemoteConfig(raw: unknown): ParsedConfigResult {
 	if (typeof obj.tokenEnv === "string" && /^[A-Z0-9_]+$/i.test(obj.tokenEnv.trim())) {
 		out.tokenEnv = obj.tokenEnv.trim();
 	}
+	if (typeof obj.tokenFile === "string" && obj.tokenFile.trim()) {
+		out.tokenFile = obj.tokenFile.trim();
+	}
 	if (typeof obj.requirePairing === "boolean") {
 		out.requirePairing = obj.requirePairing;
 	}
@@ -83,9 +87,43 @@ export function resolveRemoteConfig(
 	env: Record<string, string | undefined> = process.env,
 ): RemoteControlConfig {
 	const envUrl = env.PI_REMOTE_SERVER_URL?.trim();
+	const envTokenFile = env.PI_REMOTE_SERVER_TOKEN_FILE?.trim();
 	return {
 		...DEFAULT_REMOTE_CONFIG,
 		...overrides,
 		...(envUrl ? { serverUrl: envUrl } : {}),
+		...(envTokenFile ? { tokenFile: envTokenFile } : {}),
 	};
+}
+
+export function expandHomePath(filePath: string, homeDir: string): string {
+	const trimmed = filePath.trim();
+	if (trimmed === "~") return homeDir;
+	if (trimmed.startsWith("~/")) {
+		return `${homeDir.replace(/\/+$/, "")}/${trimmed.slice(2)}`;
+	}
+	return trimmed;
+}
+
+export function parseTokenFileContent(raw: string): string {
+	const trimmed = raw.trim();
+	if (!trimmed) return "";
+	if (trimmed.startsWith("{")) {
+		try {
+			const parsed = JSON.parse(trimmed) as unknown;
+			if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+				const record = parsed as Record<string, unknown>;
+				if (typeof record.token === "string" && record.token.trim()) {
+					return record.token.trim();
+				}
+				if (typeof record.serverToken === "string" && record.serverToken.trim()) {
+					return record.serverToken.trim();
+				}
+			}
+			return "";
+		} catch {
+			return trimmed;
+		}
+	}
+	return trimmed;
 }

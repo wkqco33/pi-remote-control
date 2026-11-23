@@ -3,13 +3,19 @@
  * Thin adapter binding pi ExtensionAPI events to WsClient + RemoteBridge.
  */
 
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { homedir, hostname } from "node:os";
 import { join } from "node:path";
 import { CONFIG_DIR_NAME, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { RemoteBridge, type RemoteHost } from "./client/remote-bridge.js";
 import { WsClient } from "./client/ws-client.js";
-import { parseRemoteConfig, resolveRemoteConfig, type RemoteControlConfig } from "./config.js";
+import {
+	expandHomePath,
+	parseRemoteConfig,
+	parseTokenFileContent,
+	resolveRemoteConfig,
+	type RemoteControlConfig,
+} from "./config.js";
 import { buildWorkDigest, parseGitBranch, parseGitNumstat } from "./core/digest.js";
 import { buildHistorySnapshot, type RawSessionEntry } from "./core/history.js";
 import { formatFooterLabel, formatStatusReport } from "./core/status.js";
@@ -49,6 +55,33 @@ async function loadExtensionConfig(cwd: string): Promise<{ config: RemoteControl
 	}
 
 	return { config: resolveRemoteConfig(merged), warnings };
+}
+
+async function loadServerToken(config: RemoteControlConfig, warnings: string[]): Promise<string> {
+	const envToken = process.env[config.tokenEnv]?.trim();
+	if (envToken) {
+		return envToken;
+	}
+	if (!config.tokenFile) {
+		return "";
+	}
+	const resolvedPath = expandHomePath(config.tokenFile, homedir());
+	try {
+		if (process.platform !== "win32") {
+			const info = await stat(resolvedPath);
+			if ((info.mode & 0o077) !== 0) {
+				warnings.push(`tokenFile (${resolvedPath}) should have 0600 permissions`);
+			}
+		}
+		const raw = await readFile(resolvedPath, "utf8");
+		return parseTokenFileContent(raw);
+	} catch (error) {
+		const code = (error as NodeJS.ErrnoException).code;
+		if (code !== "ENOENT") {
+			warnings.push(`tokenFile error (${resolvedPath}): ${error instanceof Error ? error.message : String(error)}`);
+		}
+		return "";
+	}
 }
 
 export default async function remoteControlExtension(pi: ExtensionAPI): Promise<void> {
@@ -117,7 +150,7 @@ export default async function remoteControlExtension(pi: ExtensionAPI): Promise<
 		sessionCtx = ctx;
 		const { config, warnings } = await loadExtensionConfig(ctx.cwd);
 		await refreshBranch(ctx.cwd);
-		const serverToken = process.env[config.tokenEnv]?.trim() ?? "";
+		const serverToken = await loadServerToken(config, warnings);
 
 		const host: RemoteHost = {
 			sessionId: getSessionId(ctx),

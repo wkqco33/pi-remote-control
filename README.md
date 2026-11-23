@@ -65,6 +65,7 @@ pi install git:github.com/wkqco33/pi-remote-control
 | --- | --- | --- |
 | `serverUrl` | `ws://127.0.0.1:8787/ws/agent` | 릴레이 서버 Agent WebSocket URL (`PI_REMOTE_SERVER_URL`로 덮어쓰기 가능) |
 | `tokenEnv` | `PI_REMOTE_SERVER_TOKEN` | 서버 인증 토큰을 읽을 환경변수 이름 |
+| `tokenFile` | 없음 | 환경변수가 없을 때 읽을 토큰 파일 경로 (평문 또는 `{"token":"..."}` JSON, `0600` 권장, `PI_REMOTE_SERVER_TOKEN_FILE`로 덮어쓰기 가능) |
 | `requirePairing` | `true` | 웹 클라이언트별 6자리 터미널 페어링 필수 여부 |
 | `remoteToolPolicy` | `unrestricted` | 원격 턴 도구 제한 (`unrestricted` \| `read-only` \| `no-tools`) |
 | `remoteToolApproval` | `off` | 원격 턴 비읽기전용 도구 승인 (`off` \| `local` \| `web`) |
