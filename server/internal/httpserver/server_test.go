@@ -98,20 +98,29 @@ func TestServerHealthAuthAndRelayRoundTrip(t *testing.T) {
 		t.Fatalf("agent hello write failed: %v", err)
 	}
 
-	// Verify /api/sessions with Bearer token
-	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/sessions", nil)
-	req.Header.Set("Authorization", "Bearer top-secret")
-	apiResp, err := http.DefaultClient.Do(req)
-	if err != nil || apiResp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200 on /api/sessions, got %v err=%v", apiResp, err)
-	}
+	// Verify /api/sessions with Bearer token (poll briefly for async WS registration)
 	var sessionsBody struct {
 		Sessions []protocol.SessionSummary `json:"sessions"`
 	}
-	if err := json.NewDecoder(apiResp.Body).Decode(&sessionsBody); err != nil {
-		t.Fatalf("decode sessions failed: %v", err)
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for {
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/sessions", nil)
+		req.Header.Set("Authorization", "Bearer top-secret")
+		apiResp, err := http.DefaultClient.Do(req)
+		if err != nil || apiResp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 on /api/sessions, got %v err=%v", apiResp, err)
+		}
+		sessionsBody.Sessions = nil
+		if err := json.NewDecoder(apiResp.Body).Decode(&sessionsBody); err != nil {
+			_ = apiResp.Body.Close()
+			t.Fatalf("decode sessions failed: %v", err)
+		}
+		_ = apiResp.Body.Close()
+		if len(sessionsBody.Sessions) == 1 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-	_ = apiResp.Body.Close()
 	if len(sessionsBody.Sessions) != 1 || sessionsBody.Sessions[0].SessionID != "s1" {
 		t.Fatalf("unexpected sessions: %#v", sessionsBody.Sessions)
 	}
