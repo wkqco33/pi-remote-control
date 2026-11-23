@@ -41,9 +41,11 @@ export PI_REMOTE_SERVER_URL="ws://127.0.0.1:8787/ws/agent"
 pi install ./extension
 ```
 
-또는 GitHub 저장소에서 바로 설치할 수 있습니다.
+또는 npm / GitHub 저장소에서 바로 설치할 수 있습니다.
 
 ```bash
+pi install npm:@wkqco33/pi-remote-control
+# 또는
 pi install git:github.com/wkqco33/pi-remote-control
 ```
 

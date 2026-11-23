@@ -1,6 +1,10 @@
-# pi-remote-control (pi extension)
+# @wkqco33/pi-remote-control (pi extension)
 
 `pi` 코딩 에이전트 세션을 Go 릴레이 서버(`pi-remote-server`)와 연결해 웹/모바일 브라우저에서 원격 제어할 수 있도록 해주는 `pi` 확장 패키지입니다.
+
+```bash
+pi install npm:@wkqco33/pi-remote-control
+```
 
 - 런타임 npm 의존성 제로 (Node 22+ 내장 `WebSocket` 사용)
 - 로컬 터미널 전용 6자리 페어링 코드
