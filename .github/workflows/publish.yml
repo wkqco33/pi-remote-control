@@ -1,0 +1,72 @@
+name: Publish npm package
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish extension to npm with provenance
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: extension
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "24"
+
+      # Trusted Publishing needs a recent npm; `registry-url` is omitted so
+      # setup-node does not write an empty `_authToken` that breaks OIDC.
+      - name: Upgrade npm for Trusted Publishing
+        run: npm install --global npm@latest
+
+      - name: Show runtime versions
+        run: node --version && npm --version
+
+      - name: Verify version matches tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="v$(node -p "require('./package.json').version")"
+          if [[ "${version}" != "${GITHUB_REF_NAME}" ]]; then
+            echo "::error::extension/package.json version ${version} does not match release tag ${GITHUB_REF_NAME}" >&2
+            exit 1
+          fi
+          if [[ "$(node -p "require('./package.json').private === true")" == "true" ]]; then
+            echo "::error::extension/package.json must not have private: true" >&2
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify release
+        run: |
+          npm run check
+          npm run pack:check
+
+      - name: Publish with npm Trusted Publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${GITHUB_REF_NAME#v}" in
+            *-*) dist_tag=next ;;
+            *)   dist_tag=latest ;;
+          esac
+          npm publish --provenance --access public --tag "${dist_tag}"
