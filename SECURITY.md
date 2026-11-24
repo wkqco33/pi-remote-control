@@ -25,7 +25,7 @@
 `pi-remote-control`은 원격 브라우저에서 로컬 `pi` 세션을 제어하는 구조이므로, 다음 경계를 설계상의 보안 불변식으로 취급합니다.
 
 - **릴레이 토큰 인증:** `/ws/agent`와 `/ws/client`는 연결 직후 `authTimeout`(기본 5초) 안에 첫 프레임(`agent.hello` / `client.hello`)을 보내야 합니다. 에이전트와 API 클라이언트는 이 프레임에 `serverToken`을 포함합니다. 웹 UI는 같은 출처의 `POST /api/browser-auth`에서 릴레이 토큰을 인증하고, 이후 30일간 유효한 서명된 HttpOnly 및 SameSite=Strict 쿠키를 사용합니다. 웹 토큰 로그인은 HTTPS 또는 루프백 HTTP에서 허용합니다. HTTPS 출처에서는 Secure 쿠키가 발급됩니다. 쿼리스트링 토큰은 금지됩니다.
-- **로컬 터미널 전용 페어링:** `requirePairing: true`(기본값)일 때 로컬 `pi` 터미널(`ctx.ui.notify`)에서 발급 코드를 확인합니다. 브라우저에서 제출한 코드는 릴레이를 통해 세션으로 전달됩니다. 페어링 상태와 요청은 해당 클라이언트에만 전달합니다. `requirePairing: false` 세션은 릴레이에 인증한 모든 클라이언트가 제어할 수 있습니다.
+- **로컬 터미널 전용 페어링:** 기본값인 `requirePairing: false`에서는 릴레이에 인증한 모든 클라이언트가 세션을 제어할 수 있습니다. `requirePairing: true`를 지정하면 로컬 `pi` 터미널(`ctx.ui.notify`)에서 발급 코드를 확인합니다. 브라우저에서 제출한 코드는 릴레이를 통해 세션으로 전달됩니다. 페어링 상태와 요청은 해당 클라이언트에만 전달합니다.
 - **원격 턴 도구 정책 & 승인:** `remoteToolPolicy`(`unrestricted` | `read-only` | `no-tools`)와 `remoteToolApproval`(`off` | `local` | `web`)은 원격에서 주입된 턴에만 적용됩니다. 웹 승인 요청에는 도구 이름만 전송하며 인자 원문은 전송하지 않습니다. 승인 대기 타임아웃이나 연결 끊김 시 자동으로 거절(`false`)됩니다.
 - **시크릿 리댁션:** 서버로 나가는 스트리밍 텍스트, 히스토리 스냅샷, 작업 다이제스트는 `redactSecrets`를 거칩니다. 설정 파일(`remote-control.json`)에는 토큰 원문을 저장할 수 없으며 `tokenEnv` 환경변수 이름만 허용됩니다.
 - **전송 구간 암호화 (WSS):** 공용 네트워크에서는 TLS를 적용한 리버스 프록시만 공개하세요. 프록시는 브라우저가 접속한 공개 `Host`를 릴레이에 전달해야 합니다. 원본 포트 접근은 루프백이나 프록시 전용 네트워크로 제한하고, `--dev-no-auth`로 실행하는 릴레이는 프록시에 연결하지 마세요.

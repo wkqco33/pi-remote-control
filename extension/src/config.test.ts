@@ -2,6 +2,12 @@ import { describe, expect, it } from "vitest";
 import { expandHomePath, parseRemoteConfig, parseTokenFileContent, resolveRemoteConfig } from "./config.js";
 
 describe("remote config", () => {
+	it("defaults to token-only control and respects a pairing override", () => {
+		expect(resolveRemoteConfig({}, {}).requirePairing).toBe(false);
+		const { config } = parseRemoteConfig({ requirePairing: true });
+		expect(resolveRemoteConfig(config, {}).requirePairing).toBe(true);
+	});
+
 	it("rejects raw tokens and resolves env overrides", () => {
 		const parsed = parseRemoteConfig({
 			token: "secret",

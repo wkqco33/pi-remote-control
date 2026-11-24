@@ -19,7 +19,7 @@ All WebSocket messages are UTF-8 JSON frames using a shared `Envelope`:
 - `/ws/client` must send `client.hello` as the first frame within `authTimeout`.
 - Web UI는 같은 출처의 `POST /api/browser-auth`에 `Authorization: Bearer <serverToken>`을 보내고, 발급된 쿠키로 `/ws/client`에 연결합니다. `DELETE /api/browser-auth`는 브라우저 쿠키를 지웁니다.
 - HTTP `/api/sessions` requires `Authorization: Bearer <serverToken>`.
-- Session control is additionally gated by a 6-digit pairing code shown **only** in the local pi terminal (`requirePairing: true` by default).
+- 기본값인 `requirePairing: false`에서는 릴레이에 인증한 클라이언트가 세션을 제어할 수 있습니다. `requirePairing: true`인 세션은 로컬 `pi` 터미널에 표시되는 6자리 페어링 코드도 요구합니다.
 
 ## Message Types
 ### Agent -> Server

@@ -25,7 +25,7 @@ export interface RemoteControlConfig {
 export const DEFAULT_REMOTE_CONFIG: RemoteControlConfig = {
 	serverUrl: "ws://127.0.0.1:8787/ws/agent",
 	tokenEnv: "PI_REMOTE_SERVER_TOKEN",
-	requirePairing: true,
+	requirePairing: false,
 	pairingTtlMs: 5 * 60 * 1000,
 	pairingDigits: 6,
 	pairingMaxAttempts: 3,
