@@ -70,12 +70,17 @@ export class RemoteBridge {
 	}
 
 	disconnectAll(): number {
-		const count = this.trustedClients.size;
+		const revokedClients = [...this.trustedClients];
 		this.trustedClients.clear();
 		this.pendingChallenges.clear();
 		this.rejectAllApprovals();
 		this.host.onStateChanged?.(this.sink.currentStatus, 0);
-		return count;
+		if (this.sink.currentStatus === "connected") {
+			for (const clientId of revokedClients) {
+				this.issuePairingChallenge(clientId, "pairing_revoked");
+			}
+		}
+		return revokedClients.length;
 	}
 
 	statusSnapshot(): StatusSnapshot {
@@ -94,16 +99,27 @@ export class RemoteBridge {
 	async handleServerMessage(msg: ServerInboundMessage): Promise<void> {
 		switch (msg.type) {
 			case "history.request": {
-				const items = this.host.getHistory();
-				this.sink.send({
-					type: "history.snapshot",
-					sessionId: this.host.sessionId,
-					...(msg.clientId ? { clientId: msg.clientId } : {}),
-					ts: this.host.now(),
-					payload: { items },
-				});
-				if (msg.clientId && this.config.requirePairing && !this.trustedClients.has(msg.clientId)) {
-					this.issuePairingChallenge(msg.clientId, "pairing_required");
+				const { clientId } = msg;
+				const paired = !this.config.requirePairing || (clientId !== undefined && this.trustedClients.has(clientId));
+				if (msg.pairStatusOnly && clientId) {
+					this.sink.send({
+						type: "pair.status",
+						sessionId: this.host.sessionId,
+						clientId,
+						ts: this.host.now(),
+						payload: { paired },
+					});
+				} else {
+					this.sink.send({
+						type: "history.snapshot",
+						sessionId: this.host.sessionId,
+						...(clientId ? { clientId } : {}),
+						ts: this.host.now(),
+						payload: { items: this.host.getHistory(), ...(clientId ? { paired } : {}) },
+					});
+				}
+				if (clientId && !paired) {
+					this.issuePairingChallenge(clientId, "pairing_required");
 				}
 				return;
 			}
@@ -255,6 +271,7 @@ export class RemoteBridge {
 		this.sink.send({
 			type: "pair.required",
 			sessionId: this.host.sessionId,
+			clientId,
 			ts: now,
 			payload: {
 				challengeId: challenge.challengeId,
@@ -266,6 +283,10 @@ export class RemoteBridge {
 	}
 
 	private handlePairSubmit(clientId: string, code: string): void {
+		if (!this.config.requirePairing || this.trustedClients.has(clientId)) {
+			this.sendPairResult(clientId, { ok: true, clientId });
+			return;
+		}
 		const challenge = this.pendingChallenges.get(clientId);
 		if (!challenge) {
 			this.issuePairingChallenge(clientId, "no_active_challenge");
@@ -277,13 +298,7 @@ export class RemoteBridge {
 			this.trustedClients.add(clientId);
 			this.host.notify(`[remote] Paired client ${clientId}.`, "info");
 			this.host.onStateChanged?.(this.sink.currentStatus, this.trustedClients.size);
-			this.sink.send({
-				type: "pair.result",
-				sessionId: this.host.sessionId,
-				clientId,
-				ts: this.host.now(),
-				payload: { ok: true, clientId },
-			});
+			this.sendPairResult(clientId, { ok: true, clientId });
 			return;
 		}
 		if (result.reason === "mismatch" && result.next) {
@@ -291,12 +306,16 @@ export class RemoteBridge {
 		} else {
 			this.pendingChallenges.delete(clientId);
 		}
+		this.sendPairResult(clientId, { ok: false, clientId, error: result.reason });
+	}
+
+	private sendPairResult(clientId: string, payload: { ok: boolean; clientId: string; error?: string }): void {
 		this.sink.send({
 			type: "pair.result",
 			sessionId: this.host.sessionId,
 			clientId,
 			ts: this.host.now(),
-			payload: { ok: false, clientId, error: result.reason },
+			payload,
 		});
 	}
 

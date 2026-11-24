@@ -18,8 +18,31 @@ func TestLoadRequiresTokenUnlessDevNoAuth(t *testing.T) {
 	if !cfg.DevNoAuth {
 		t.Fatal("expected DevNoAuth=true")
 	}
-	if cfg.Addr != DefaultAddr {
-		t.Fatalf("expected default addr %q, got %q", DefaultAddr, cfg.Addr)
+	if cfg.Addr != "127.0.0.1:8787" {
+		t.Fatalf("expected default IPv4 loopback at port 8787, got %q", cfg.Addr)
+	}
+}
+
+func TestDevNoAuthRequiresLoopback(t *testing.T) {
+	for _, addr := range []string{"127.0.0.1:8787", "[::1]:8787"} {
+		if _, err := Load([]string{"--dev-no-auth", "--addr", addr}, func(string) string { return "" }); err != nil {
+			t.Errorf("loopback address %q rejected: %v", addr, err)
+		}
+	}
+	for _, addr := range []string{":8787", "0.0.0.0:8787", "[::]:8787", "192.0.2.1:8787", "relay.example:8787", "127.0.0.1"} {
+		_, err := Load(nil, func(key string) string {
+			switch key {
+			case "PI_REMOTE_DEV_NO_AUTH":
+				return "1"
+			case "PI_REMOTE_ADDR":
+				return addr
+			default:
+				return ""
+			}
+		})
+		if err == nil {
+			t.Errorf("dev-no-auth accepted unsafe or malformed address %q", addr)
+		}
 	}
 }
 

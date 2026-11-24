@@ -5,13 +5,15 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
+	"net/netip"
 	"strconv"
 	"strings"
 	"time"
 )
 
 const (
-	DefaultAddr            = ":8787"
+	DefaultAddr            = "127.0.0.1:8787"
 	DefaultRingBufferSize  = 512
 	DefaultMaxMessageBytes = 10 * 1024 * 1024
 	DefaultAuthTimeout     = 5 * time.Second
@@ -86,7 +88,7 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&cfg.Addr, "addr", cfg.Addr, "HTTP/WebSocket listen address")
 	fs.StringVar(&cfg.ServerToken, "token", cfg.ServerToken, "Shared server authentication token")
-	fs.BoolVar(&cfg.DevNoAuth, "dev-no-auth", cfg.DevNoAuth, "Allow unauthenticated connections (development only)")
+	fs.BoolVar(&cfg.DevNoAuth, "dev-no-auth", cfg.DevNoAuth, "Allow unauthenticated connections on a loopback IP (development only)")
 	fs.StringVar(&originsFlag, "allowed-origins", "", "Comma-separated allowed WebSocket origins")
 	fs.IntVar(&cfg.RingBufferSize, "ring-buffer-size", cfg.RingBufferSize, "Per-session event ring buffer capacity")
 	fs.Int64Var(&cfg.MaxMessageBytes, "max-message-bytes", cfg.MaxMessageBytes, "Maximum WebSocket message size in bytes")
@@ -113,6 +115,16 @@ func (c Config) Validate() error {
 	}
 	if !c.DevNoAuth && strings.TrimSpace(c.ServerToken) == "" {
 		return errors.New("server token is required unless --dev-no-auth / PI_REMOTE_DEV_NO_AUTH=1 is set")
+	}
+	if c.DevNoAuth {
+		host, _, err := net.SplitHostPort(c.Addr)
+		if err != nil {
+			return fmt.Errorf("invalid listen address: %w", err)
+		}
+		ip, err := netip.ParseAddr(host)
+		if err != nil || !ip.Unmap().IsLoopback() {
+			return errors.New("dev-no-auth requires a numeric loopback listen address (127.0.0.1 or ::1)")
+		}
 	}
 	if c.RingBufferSize < 1 {
 		return errors.New("ring-buffer-size must be >= 1")

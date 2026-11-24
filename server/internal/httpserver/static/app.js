@@ -1,419 +1,460 @@
 (function () {
   "use strict";
 
-  const TOKEN_KEY = "pi_remote_server_token";
-  const CLIENT_ID_KEY = "pi_remote_client_id";
+  const byId = (id) => document.getElementById(id);
+  const hide = (id, hidden) => byId(id).classList.toggle("hidden", hidden);
+  function label(id, value) {
+    const element = byId(id);
+    if (element.textContent !== String(value)) element.textContent = value;
+  }
+  const clientIdKey = "pi_remote_tab_id";
+  const activeKey = "pi_remote_active_session";
+  const authDialog = byId("auth-dialog");
+  const prompt = byId("prompt-input");
+  const timeline = byId("timeline");
+  const fileInput = byId("file-input");
+  const mode = byId("deliver-mode");
+  const pairInput = byId("pair-code-input");
+  const views = new Map();
+  let sessions = [];
+  let active = null;
+  let connection = "connecting";
+  let lastSession = sessionStorage.getItem(activeKey);
 
-  function getOrCreateClientId() {
-    let id = localStorage.getItem(CLIENT_ID_KEY);
+  function browserClientId() {
+    let id = sessionStorage.getItem(clientIdKey);
     if (!id) {
-      id = "web-" + Math.random().toString(36).slice(2, 10);
-      localStorage.setItem(CLIENT_ID_KEY, id);
+      const bytes = crypto.getRandomValues(new Uint8Array(16));
+      id = "web-" + Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
     }
+    sessionStorage.setItem(clientIdKey, id);
     return id;
   }
 
-  const els = {
-    sidebar: document.getElementById("sidebar"),
-    connDot: document.getElementById("conn-dot"),
-    connText: document.getElementById("conn-status-text"),
-    sessionList: document.getElementById("session-list"),
-    activeTitle: document.getElementById("active-session-title"),
-    activeSub: document.getElementById("active-session-sub"),
-    btnDigest: document.getElementById("btn-digest"),
-    btnAbort: document.getElementById("btn-abort"),
-    pairingBanner: document.getElementById("pairing-banner"),
-    pairForm: document.getElementById("pair-form"),
-    pairInput: document.getElementById("pair-code-input"),
-    approvalBanner: document.getElementById("approval-banner"),
-    approvalTool: document.getElementById("approval-tool-name"),
-    approvalCountdown: document.getElementById("approval-countdown"),
-    btnApprove: document.getElementById("btn-approve-tool"),
-    btnReject: document.getElementById("btn-reject-tool"),
-    digestPanel: document.getElementById("digest-panel"),
-    digestBody: document.getElementById("digest-body"),
-    btnCloseDigest: document.getElementById("btn-close-digest"),
-    timeline: document.getElementById("timeline"),
-    composer: document.getElementById("composer"),
-    promptInput: document.getElementById("prompt-input"),
-    deliverMode: document.getElementById("deliver-mode"),
-    btnSend: document.getElementById("btn-send"),
-    fileInput: document.getElementById("file-input"),
-    attPreview: document.getElementById("attachment-preview"),
-    authDialog: document.getElementById("auth-dialog"),
-    authForm: document.getElementById("auth-form"),
-    tokenInput: document.getElementById("server-token-input"),
-    btnAuthSettings: document.getElementById("btn-auth-settings"),
-    btnAuthCancel: document.getElementById("btn-auth-cancel"),
-    btnToggleSidebar: document.getElementById("btn-toggle-sidebar"),
-  };
-
-  let sessions = [];
-  let activeSessionId = null;
-  let pendingApproval = null;
-  let approvalTimer = null;
-  let pendingImages = [];
-  let activeAssistantEl = null;
-  let activeThinkingText = "";
-  let activeReplyText = "";
-
   const client = new window.PiRelayClient({
-    clientId: getOrCreateClientId(),
-    getToken: () => sessionStorage.getItem(TOKEN_KEY) || "",
-    onStatus: (status) => {
-      els.connText.textContent = status;
-      els.connDot.classList.toggle("online", status === "connected");
-    },
+    clientId: browserClientId(),
+    onStatus: updateConnection,
     onEnvelope: handleEnvelope,
   });
+  const conversation = window.PiConversation;
+  const updateAuth = window.PiBrowserAuth({
+    connect: () => client.connect(),
+    signedOut: resetWorkspace,
+    status: () => connection,
+  });
+
+  function updateConnection(status) {
+    connection = status;
+    label("conn-status-text", {
+      connecting: "Connecting",
+      connected: "Connected",
+      disconnected: "Reconnecting",
+      unauthorized: "Sign in required",
+    }[status]);
+    byId("conn-dot").classList.toggle("online", client.ready);
+    if (status === "unauthorized") clearWorkspace();
+    updateAuth(status);
+    renderSessions();
+    renderActive();
+  }
 
   function renderSessions() {
-    els.sessionList.innerHTML = "";
-    if (sessions.length === 0) {
-      els.sessionList.innerHTML = '<div class="muted" style="padding:8px;">No active pi sessions.</div>';
+    const list = byId("session-list");
+    const query = byId("session-filter").value.trim().toLowerCase();
+    const shown = sessions.filter((s) =>
+      [s.sessionName, s.sessionId, s.host, s.cwd, s.branch, s.model].some((part) => part?.toLowerCase().includes(query)));
+    label("session-count", sessions.length);
+    const focused = list.contains(document.activeElement) ? document.activeElement.dataset.sessionId : null;
+    list.replaceChildren();
+    if (shown.length === 0) {
+      const message = document.createElement("p");
+      message.className = "session-list-empty muted";
+      message.textContent = connection === "connected" ?
+        (sessions.length ? "No matching sessions." : "No sessions online.") :
+        labelForConnection();
+      list.appendChild(message);
       return;
     }
-    for (const s of sessions) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "session-item" + (s.sessionId === activeSessionId ? " active" : "");
-      const title = s.sessionName || s.sessionId.slice(0, 8);
-      btn.innerHTML = `
-        <div class="session-item-top">
-          <strong>${window.PiMarkdown.escapeHtml(title)}</strong>
-          <span class="badge ${s.state === "busy" ? "busy" : "idle"}">${window.PiMarkdown.escapeHtml(s.state || "idle")}</span>
-        </div>
-        <div class="session-item-meta">${window.PiMarkdown.escapeHtml(s.host)} · ${window.PiMarkdown.escapeHtml(s.cwd)}</div>
-      `;
-      btn.addEventListener("click", () => selectSession(s.sessionId));
-      els.sessionList.appendChild(btn);
-    }
-    updateActiveHeader();
-  }
-
-  function updateActiveHeader() {
-    const s = sessions.find((x) => x.sessionId === activeSessionId);
-    const enabled = Boolean(s);
-    els.promptInput.disabled = !enabled;
-    els.btnSend.disabled = !enabled;
-    els.btnDigest.disabled = !enabled;
-    els.btnAbort.disabled = !enabled || s.state !== "busy";
-    if (!s) {
-      els.activeTitle.textContent = "No session selected";
-      els.activeSub.textContent = "Connect to a running pi session from the sidebar.";
-      return;
-    }
-    els.activeTitle.textContent = s.sessionName || s.sessionId;
-    const parts = [s.host, s.cwd];
-    if (s.branch) parts.push(`branch:${s.branch}`);
-    if (s.model) parts.push(s.model);
-    if (s.runningTool) parts.push(`tool:${s.runningTool}`);
-    els.activeSub.textContent = parts.join(" · ");
-  }
-
-  function selectSession(sessionId) {
-    activeSessionId = sessionId;
-    els.sidebar.classList.remove("open");
-    els.timeline.innerHTML = "";
-    activeAssistantEl = null;
-    activeThinkingText = "";
-    activeReplyText = "";
-    els.pairingBanner.classList.add("hidden");
-    clearApproval();
-    renderSessions();
-    client.subscribe(sessionId);
-  }
-
-  function appendMessage(role, text, thinking) {
-    const div = document.createElement("div");
-    div.className = `msg ${role}`;
-    const roleEl = document.createElement("div");
-    roleEl.className = "msg-role";
-    roleEl.textContent = role;
-    div.appendChild(roleEl);
-    if (thinking) {
-      const th = document.createElement("div");
-      th.className = "thinking-box";
-      th.textContent = thinking;
-      div.appendChild(th);
-    }
-    const body = document.createElement("div");
-    body.className = "markdown-body";
-    body.innerHTML = window.PiMarkdown.render(text);
-    div.appendChild(body);
-    els.timeline.appendChild(div);
-    els.timeline.scrollTop = els.timeline.scrollHeight;
-    return div;
-  }
-
-  function ensureActiveAssistant() {
-    if (activeAssistantEl) return activeAssistantEl;
-    activeThinkingText = "";
-    activeReplyText = "";
-    activeAssistantEl = appendMessage("assistant", "", "");
-    return activeAssistantEl;
-  }
-
-  function refreshActiveAssistant() {
-    if (!activeAssistantEl) return;
-    let th = activeAssistantEl.querySelector(".thinking-box");
-    if (activeThinkingText) {
-      if (!th) {
-        th = document.createElement("div");
-        th.className = "thinking-box";
-        activeAssistantEl.insertBefore(th, activeAssistantEl.querySelector(".markdown-body"));
+    for (const s of shown) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.sessionId = s.sessionId;
+      button.className = "session-item";
+      if (s.sessionId === active?.id) {
+        button.classList.add("active");
+        button.setAttribute("aria-current", "true");
       }
-      th.textContent = activeThinkingText;
+      const top = document.createElement("div");
+      top.className = "session-item-top";
+      const title = document.createElement("strong");
+      title.textContent = s.sessionName || s.cwd?.split("/").filter(Boolean).pop() || s.sessionId.slice(0, 8);
+      const state = document.createElement("span");
+      state.className = s.state === "busy" ? "badge busy" : "badge idle";
+      state.textContent = s.state === "busy" ? "Busy" : "Idle";
+      top.append(title, state);
+      const meta = document.createElement("div");
+      meta.className = "session-item-meta";
+      meta.textContent = [s.host, s.cwd].filter(Boolean).join(" · ");
+      button.title = meta.textContent;
+      button.append(top, meta);
+      button.addEventListener("click", () => selectSession(s));
+      list.appendChild(button);
+      if (focused === s.sessionId) button.focus({ preventScroll: true });
     }
-    const body = activeAssistantEl.querySelector(".markdown-body");
-    body.innerHTML = window.PiMarkdown.render(activeReplyText);
-    els.timeline.scrollTop = els.timeline.scrollHeight;
+  }
+
+  function labelForConnection() {
+    return connection === "unauthorized" ? "Sign in to see sessions." : "Waiting for the relay…";
+  }
+
+  function updateSessions(next) {
+    sessions = next;
+    for (const view of views.values()) {
+      const summary = sessions.find((s) => s.sessionId === view.id);
+      if (view.summary?.connectedAt !== summary?.connectedAt || !summary) {
+        client.unsubscribe(view.id);
+        view.paired = undefined;
+        view.challenge = null;
+        view.pairError = "";
+        view.awaitingPair = false;
+        view.approval = null;
+        view.digest = "";
+        view.digestOpen = false;
+        view.loading = Boolean(summary);
+        if (summary) client.subscribe(view.id);
+      }
+      view.summary = summary;
+    }
+    if (!active && sessions.length > 0) {
+      selectSession(sessions.find((s) => s.sessionId === lastSession) || sessions[0]);
+    } else {
+      renderSessions();
+      renderActive();
+    }
+  }
+
+  function selectSession(summary) {
+    const sidebarWasOpen = byId("sidebar").classList.contains("open");
+    closeSidebar();
+    if (active) active.scroll = nearLatestMessage() ? null : timeline.scrollTop;
+    let view = views.get(summary.sessionId);
+    if (!view) {
+      const thread = document.createElement("div");
+      thread.className = "conversation-thread";
+      view = {
+        id: summary.sessionId, summary, thread, scroll: null, draft: "",
+        mode: "followUp", images: [], loading: true,
+      };
+      views.set(view.id, view);
+      client.subscribe(view.id);
+    }
+    if (active !== view) {
+      active = view;
+      lastSession = active.id;
+      sessionStorage.setItem(activeKey, lastSession);
+      prompt.value = active.draft;
+      mode.value = active.mode;
+      pairInput.value = "";
+      timeline.replaceChildren(active.thread);
+      renderAttachments();
+    }
+    renderSessions();
+    renderActive();
+    timeline.scrollTop = active.scroll ?? timeline.scrollHeight;
+    if (sidebarWasOpen) byId("btn-toggle-sidebar").focus();
+  }
+
+  function controllable(view) {
+    return client.ready && Boolean(view?.summary) && !view.loading && (!view.summary.requirePairing || view.paired === true);
+  }
+
+  function renderActive() {
+    const summary = active?.summary;
+    const enabled = controllable(active);
+    const title = summary && (summary.sessionName || summary.cwd?.split("/").filter(Boolean).pop() || summary.sessionId);
+    label("active-session-title", title || (active ? "Session offline" : "No session selected"));
+    label("active-session-sub", summary ?
+      [summary.host, summary.cwd, summary.branch, summary.model, summary.runningTool].filter(Boolean).join(" · ") :
+      "Running pi sessions appear in the sidebar.");
+    prompt.disabled = !enabled;
+    fileInput.disabled = !enabled;
+    mode.disabled = !enabled;
+    byId("btn-send").disabled = !enabled;
+    byId("btn-digest").disabled = !enabled;
+    byId("btn-abort").disabled = !enabled || summary.state !== "busy";
+
+    const empty = !active?.thread.hasChildNodes();
+    hide("empty-state", !empty);
+    hide("timeline", empty);
+    if (empty) {
+      let heading = "No messages yet";
+      let description = "Send a message to start working in this pi session.";
+      if (!client.ready) {
+        heading = connection === "unauthorized" ? "Connect to the relay" : "Connecting to the relay";
+        description = labelForConnection();
+      } else if (!active) {
+        heading = "No sessions online";
+        description = "Start pi with the remote-control extension to connect a session.";
+      } else if (!summary) {
+        heading = "Session offline";
+        description = "Choose another session or wait for pi to reconnect.";
+      } else if (active.loading) {
+        heading = "Loading conversation";
+        description = "Waiting for pi to send its recent history.";
+      } else if (!enabled) {
+        heading = "Pair this session to send a message";
+        description = "Use the code shown in the pi terminal.";
+      }
+      label("empty-title", heading);
+      label("empty-description", description);
+    }
+    renderBanners();
+    hide("digest-panel", !active?.digestOpen);
+    if (active?.digestOpen && byId("digest-body").dataset.sessionId !== active.id) renderDigest();
+  }
+
+  function renderBanners() {
+    const pair = client.ready && active?.summary?.requirePairing && active.paired === false;
+    const challenge = pair && active.challenge;
+    const validCode = challenge && challenge.expiresAt > Date.now();
+    hide("pairing-banner", !pair);
+    if (pair) {
+      label("pair-description", validCode ?
+        `Enter the ${challenge.digits}-digit code shown in the local pi terminal.` :
+        (challenge ? "The code expired. Request a new code from the pi terminal." : "Request a pairing code from the local pi terminal."));
+      label("pair-error", active.pairError || "");
+      hide("pair-error", !active.pairError);
+      hide("pair-form", !validCode);
+      hide("btn-retry-pairing", Boolean(validCode));
+      pairInput.disabled = active.awaitingPair === true;
+      byId("pair-form").querySelector("button").disabled = pairInput.disabled;
+    }
+    const approval = controllable(active) && active.approval;
+    const seconds = approval ? Math.ceil((approval.expiresAt - Date.now()) / 1000) : 0;
+    hide("approval-banner", seconds <= 0);
+    if (seconds > 0) {
+      label("approval-tool-name", approval.toolName || "Tool");
+      label("approval-countdown", `(${seconds}s)`);
+    }
+  }
+
+  function renderDigest() {
+    const body = byId("digest-body");
+    body.dataset.sessionId = active?.id || "";
+    body.innerHTML = window.PiMarkdown.render(active?.digest);
+  }
+
+  function nearLatestMessage() {
+    return timeline.scrollHeight - timeline.clientHeight - timeline.scrollTop < 96;
   }
 
   function handleEnvelope(env) {
+    const payload = env.payload || {};
     if (env.type === "client.welcome" || env.type === "sessions.update") {
-      sessions = (env.payload && env.payload.sessions) || [];
-      if (!activeSessionId && sessions.length > 0) {
-        selectSession(sessions[0].sessionId);
-      } else {
-        renderSessions();
-      }
+      updateSessions(payload.sessions || []);
       return;
     }
-
+    const view = views.get(env.sessionId);
     if (env.type === "error") {
-      const msg = (env.payload && env.payload.message) || "Server error";
-      appendMessage("system", `Error: ${msg}`);
-      if (env.payload && env.payload.code === "unauthorized") {
-        els.authDialog.showModal();
-      }
+      if (view) conversation.appendMessage(view, "system", payload.message || "Relay error");
+      if (view === active) renderActive();
       return;
     }
-
-    if (env.sessionId && env.sessionId !== activeSessionId) return;
-
+    if (!view) return;
+    const nearBottom = view === active && nearLatestMessage();
     switch (env.type) {
-      case "history.snapshot": {
-        els.timeline.innerHTML = "";
-        activeAssistantEl = null;
-        const items = (env.payload && env.payload.items) || [];
-        for (const item of items) {
-          appendMessage(item.role || "assistant", item.text || "");
-        }
+      case "history.snapshot":
+        view.loading = false;
+        // Older agents omit paired. Only token-only sessions can skip the check.
+        view.paired = payload.paired ?? !view.summary?.requirePairing;
+        if (view.paired) clearPairing(view);
+        conversation.applyEvent(view, env);
         break;
-      }
-      case "stream.start":
-        activeAssistantEl = null;
-        ensureActiveAssistant();
+      case "pair.status":
+        view.paired = payload.paired;
+        if (view.paired) clearPairing(view);
         break;
-      case "stream.delta":
-        ensureActiveAssistant();
-        if (env.payload && env.payload.kind === "thinking") {
-          activeThinkingText += env.payload.delta || "";
-        } else if (env.payload) {
-          activeReplyText += env.payload.delta || "";
-        }
-        refreshActiveAssistant();
-        break;
-      case "stream.end":
-        if (env.payload && typeof env.payload.text === "string" && env.payload.text.length > 0) {
-          ensureActiveAssistant();
-          activeReplyText = env.payload.text;
-          refreshActiveAssistant();
-        }
-        activeAssistantEl = null;
-        break;
-      case "tool.start": {
-        const card = document.createElement("details");
-        card.className = "tool-card";
-        card.dataset.toolCallId = env.payload.toolCallId || "";
-        card.innerHTML = `<summary><span>⚙ ${window.PiMarkdown.escapeHtml(env.payload.toolName || "tool")}</span><span class="muted">running…</span></summary>`;
-        els.timeline.appendChild(card);
-        els.timeline.scrollTop = els.timeline.scrollHeight;
-        break;
-      }
-      case "tool.end": {
-        const cards = els.timeline.querySelectorAll(".tool-card");
-        const target = Array.from(cards).find((c) => c.dataset.toolCallId === (env.payload && env.payload.toolCallId));
-        const status = env.payload && env.payload.isError ? "failed" : "done";
-        const dur = env.payload && typeof env.payload.durationMs === "number" ? ` (${env.payload.durationMs}ms)` : "";
-        if (target) {
-          const span = target.querySelector("summary span:last-child");
-          if (span) span.textContent = `${status}${dur}`;
-        } else {
-          appendMessage("system", `Tool ${env.payload.toolName}: ${status}${dur}`);
-        }
-        break;
-      }
       case "pair.required":
-        els.pairingBanner.classList.remove("hidden");
+        view.paired = false;
+        view.challenge = payload;
+        view.awaitingPair = false;
+        if (view === active) pairInput.value = "";
         break;
       case "pair.result":
-        if (env.payload && env.payload.ok) {
-          els.pairingBanner.classList.add("hidden");
-          appendMessage("system", "Paired successfully with session.");
-        } else {
-          appendMessage("system", `Pairing failed: ${(env.payload && env.payload.error) || "invalid code"}`);
+        view.paired = payload.ok === true;
+        view.awaitingPair = false;
+        if (view.paired) clearPairing(view);
+        else {
+          view.pairError = payload.error === "mismatch" ?
+            "That code did not match. Check the pi terminal and try again." :
+            "Request a new code and try again.";
+          if (payload.error !== "mismatch") view.challenge = null;
         }
+        if (view === active) pairInput.value = "";
         break;
       case "approval.request":
-        showApproval(env.payload);
+        view.approval = { ...payload, expiresAt: (env.ts || Date.now()) + (payload.timeoutMs || 60000) };
         break;
       case "digest.snapshot":
-        els.digestBody.innerHTML = window.PiMarkdown.render((env.payload && env.payload.markdown) || "");
-        els.digestPanel.classList.remove("hidden");
+        view.digest = payload.markdown || "";
+        view.digestOpen = true;
+        if (view === active) renderDigest();
         break;
       case "session.offline":
-        appendMessage("system", "Session went offline.");
-        break;
+        updateSessions(sessions.filter((s) => s.sessionId !== view.id));
+        return;
+      default:
+        if (!conversation.applyEvent(view, env)) return;
+    }
+    if (view === active) {
+      renderActive();
+      if (nearBottom || env.type === "history.snapshot") timeline.scrollTop = timeline.scrollHeight;
     }
   }
 
-  function showApproval(req) {
-    clearApproval();
-    if (!req) return;
-    pendingApproval = req;
-    els.approvalTool.textContent = req.toolName || "tool";
-    let left = Math.ceil((req.timeoutMs || 60000) / 1000);
-    els.approvalCountdown.textContent = `(${left}s)`;
-    els.approvalBanner.classList.remove("hidden");
-    approvalTimer = setInterval(() => {
-      left -= 1;
-      els.approvalCountdown.textContent = `(${Math.max(0, left)}s)`;
-      if (left <= 0) clearApproval();
-    }, 1000);
+  function clearPairing(view) {
+    view.challenge = null;
+    view.pairError = "";
+    view.awaitingPair = false;
   }
 
-  function clearApproval() {
-    pendingApproval = null;
-    if (approvalTimer) {
-      clearInterval(approvalTimer);
-      approvalTimer = null;
-    }
-    els.approvalBanner.classList.add("hidden");
+  function sendTo(view, type, fields = {}) {
+    return client.send({ type, sessionId: view.id, payload: { sessionId: view.id, ...fields } });
   }
 
   function respondApproval(approved) {
-    if (!pendingApproval || !activeSessionId) return;
-    client.send({
-      type: "approval.response",
-      sessionId: activeSessionId,
-      payload: {
-        sessionId: activeSessionId,
-        requestId: pendingApproval.requestId,
-        approved,
-      },
-    });
-    clearApproval();
+    if (!controllable(active) || !active.approval || active.approval.expiresAt <= Date.now()) return;
+    if (sendTo(active, "approval.response", { requestId: active.approval.requestId, approved })) {
+      active.approval = null;
+      renderBanners();
+    }
   }
 
-  els.btnApprove.addEventListener("click", () => respondApproval(true));
-  els.btnReject.addEventListener("click", () => respondApproval(false));
+  byId("btn-approve-tool").onclick = () => respondApproval(true);
+  byId("btn-reject-tool").onclick = () => respondApproval(false);
+  byId("pair-form").onsubmit = (event) => {
+    event.preventDefault();
+    const code = pairInput.value.replace(/[\s-]+/g, "");
+    if (!client.ready || !active?.challenge || active.awaitingPair || active.challenge.expiresAt <= Date.now()) return;
+    if (!/^\d+$/.test(code) || code.length !== active.challenge.digits) {
+      active.pairError = `Enter all ${active.challenge.digits} digits from the pi terminal.`;
+    } else if (sendTo(active, "pair.submit", { code })) {
+      active.pairError = "";
+      active.awaitingPair = true;
+    }
+    renderBanners();
+  };
+  byId("btn-retry-pairing").onclick = () => {
+    if (client.ready && active) client.requestHistory(active.id);
+  };
+  byId("btn-digest").onclick = () => { if (controllable(active)) sendTo(active, "digest.request"); };
+  byId("btn-close-digest").onclick = () => { active.digestOpen = false; renderActive(); };
+  byId("btn-abort").onclick = () => { if (controllable(active)) sendTo(active, "turn.abort"); };
+  byId("session-filter").oninput = renderSessions;
+  prompt.oninput = () => { if (active) active.draft = prompt.value; };
+  mode.onchange = () => { if (active) active.mode = mode.value; };
 
-  els.pairForm.addEventListener("submit", (e) => {
-    e.preventDefault();
-    if (!activeSessionId) return;
-    const code = els.pairInput.value.trim();
-    if (!code) return;
-    client.send({
-      type: "pair.submit",
-      sessionId: activeSessionId,
-      payload: { sessionId: activeSessionId, code },
-    });
-    els.pairInput.value = "";
-  });
-
-  els.btnDigest.addEventListener("click", () => {
-    if (!activeSessionId) return;
-    client.send({ type: "digest.request", sessionId: activeSessionId, payload: { sessionId: activeSessionId } });
-  });
-  els.btnCloseDigest.addEventListener("click", () => els.digestPanel.classList.add("hidden"));
-  els.btnAbort.addEventListener("click", () => {
-    if (!activeSessionId) return;
-    client.send({ type: "turn.abort", sessionId: activeSessionId, payload: { sessionId: activeSessionId } });
-  });
-
-  els.fileInput.addEventListener("change", async () => {
-    const files = Array.from(els.fileInput.files || []).slice(0, 4);
+  fileInput.onchange = async () => {
+    const owner = active;
+    const files = Array.from(fileInput.files || []).slice(0, 4);
+    fileInput.value = "";
+    if (!controllable(owner)) return;
     for (const file of files) {
-      if (file.size > 8 * 1024 * 1024 || pendingImages.length >= 4) continue;
-      const dataUrl = await new Promise((resolve) => {
+      if (file.size > 8 * 1024 * 1024 || owner.images.length >= 4) continue;
+      const data = await new Promise((resolve) => {
         const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onload = () => resolve(String(reader.result).split(",")[1]);
+        reader.onerror = () => resolve(null);
         reader.readAsDataURL(file);
       });
-      const base64 = dataUrl.split(",")[1];
-      if (base64) {
-        pendingImages.push({ mediaType: file.type || "image/png", data: base64, name: file.name });
-      }
+      if (data && owner.images.length < 4) owner.images.push({ mediaType: file.type || "image/png", data, name: file.name });
     }
-    els.fileInput.value = "";
-    renderAttachments();
-  });
+    if (owner === active) renderAttachments();
+  };
 
   function renderAttachments() {
-    els.attPreview.innerHTML = "";
-    els.attPreview.classList.toggle("hidden", pendingImages.length === 0);
-    pendingImages.forEach((img, idx) => {
+    const preview = byId("attachment-preview");
+    preview.replaceChildren();
+    hide("attachment-preview", !active?.images.length);
+    active?.images.forEach((image, index) => {
       const chip = document.createElement("span");
       chip.className = "att-chip";
-      chip.textContent = img.name;
-      const rm = document.createElement("button");
-      rm.type = "button";
-      rm.className = "btn btn-ghost btn-sm";
-      rm.textContent = "×";
-      rm.addEventListener("click", () => {
-        pendingImages.splice(idx, 1);
-        renderAttachments();
-      });
-      chip.appendChild(rm);
-      els.attPreview.appendChild(chip);
+      chip.textContent = image.name;
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "btn btn-ghost btn-sm";
+      remove.textContent = "×";
+      remove.setAttribute("aria-label", `Remove ${image.name}`);
+      remove.onclick = () => { active.images.splice(index, 1); renderAttachments(); };
+      chip.appendChild(remove);
+      preview.appendChild(chip);
     });
   }
 
   function submitPrompt() {
-    if (!activeSessionId) return;
-    const text = els.promptInput.value.trim();
-    if (!text && pendingImages.length === 0) return;
-    const active = sessions.find((s) => s.sessionId === activeSessionId);
-    const payload = {
-      sessionId: activeSessionId,
-      text,
-      images: pendingImages.map(({ mediaType, data }) => ({ mediaType, data })),
-    };
-    if (active && active.state === "busy") {
-      payload.deliverAs = els.deliverMode.value;
-    }
-    if (client.send({ type: "prompt.send", sessionId: activeSessionId, payload })) {
-      appendMessage("user", text || "[image]");
-      els.promptInput.value = "";
-      pendingImages = [];
+    if (!controllable(active)) return;
+    const text = prompt.value.trim();
+    if (!text && !active.images.length) return;
+    const images = active.images.map(({ mediaType, data }) => ({ mediaType, data }));
+    const deliverAs = active.summary.state === "busy" ? active.mode : undefined;
+    if (sendTo(active, "prompt.send", { text, images, deliverAs })) {
+      conversation.appendMessage(active, "user", text || "[Image]");
+      prompt.value = active.draft = "";
+      active.images = [];
       renderAttachments();
+      renderActive();
+      timeline.scrollTop = timeline.scrollHeight;
     }
   }
 
-  els.composer.addEventListener("submit", (e) => {
-    e.preventDefault();
-    submitPrompt();
-  });
-
-  els.promptInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
+  byId("composer").onsubmit = (event) => { event.preventDefault(); submitPrompt(); };
+  prompt.onkeydown = (event) => {
+    if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
       submitPrompt();
+    }
+  };
+
+  function closeSidebar() {
+    byId("sidebar").classList.remove("open");
+    byId("btn-toggle-sidebar").setAttribute("aria-expanded", "false");
+  }
+
+  byId("btn-toggle-sidebar").onclick = () => {
+    const open = byId("sidebar").classList.toggle("open");
+    byId("btn-toggle-sidebar").setAttribute("aria-expanded", String(open));
+    if (open) byId("session-filter").focus();
+  };
+  byId("sidebar-overlay").onclick = () => { closeSidebar(); byId("btn-toggle-sidebar").focus(); };
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !authDialog.open && byId("sidebar").classList.contains("open")) {
+      closeSidebar();
+      byId("btn-toggle-sidebar").focus();
     }
   });
 
-  els.btnAuthSettings.addEventListener("click", () => {
-    els.tokenInput.value = sessionStorage.getItem(TOKEN_KEY) || "";
-    els.authDialog.showModal();
-  });
-  els.btnAuthCancel.addEventListener("click", () => els.authDialog.close());
-  els.authForm.addEventListener("submit", () => {
-    sessionStorage.setItem(TOKEN_KEY, els.tokenInput.value.trim());
-    client.connect();
-  });
-  els.btnToggleSidebar.addEventListener("click", () => els.sidebar.classList.toggle("open"));
+  function clearWorkspace() {
+    client.subscriptions.clear();
+    views.clear();
+    sessions = [];
+    active = null;
+    prompt.value = "";
+    pairInput.value = "";
+    timeline.replaceChildren();
+    byId("digest-body").replaceChildren();
+    byId("session-filter").value = "";
+    renderAttachments();
+  }
 
+  function resetWorkspace() {
+    client.close();
+    sessionStorage.removeItem(activeKey);
+    sessionStorage.removeItem(clientIdKey);
+    lastSession = null;
+    client.clientId = browserClientId();
+    updateConnection("unauthorized");
+  }
+
+  setInterval(renderBanners, 1000);
   client.connect();
 })();

@@ -69,13 +69,20 @@ func TestHubRoutingAndReplay(t *testing.T) {
 		t.Fatalf("expected prompt.send routed to agent with clientId, got %#v", agentMsgs)
 	}
 
-	// Second client subscribes from seq 0 and receives replay
+	// A new client restores history without replaying the old stream first.
 	client2 := &fakePeer{}
 	c2Gen, _ := h.RegisterClient("c2", client2.send)
 	defer h.UnregisterClient("c2", c2Gen)
 	h.Subscribe("c2", "s1", 0)
-	if len(client2.list()) != 1 || client2.list()[0].Type != protocol.TypeStreamDelta {
-		t.Fatalf("expected replay of stream.delta to c2, got %#v", client2.list())
+	request := expectHistoryRequest(t, agentPeer, "c2")
+	if request.PairStatusOnly || len(client2.list()) != 0 {
+		t.Fatalf("expected fresh history request, got %#v and %#v", request, client2.list())
+	}
+	snapshot, _ := protocol.NewEnvelope(protocol.TypeHistorySnapshot, "s1", map[string]bool{"paired": true})
+	snapshot.ClientID = "c2"
+	h.HandleAgentEvent("s1", snapshot)
+	if msgs := client2.list(); len(msgs) != 1 || msgs[0].Type != protocol.TypeHistorySnapshot || msgs[0].Seq != 1 {
+		t.Fatalf("expected snapshot with replay baseline 1, got %#v", msgs)
 	}
 
 	// Stale unregister does not remove active agent
@@ -98,4 +105,73 @@ func TestHubRoutingAndReplay(t *testing.T) {
 	if !foundOffline {
 		t.Fatal("expected session.offline sent to subscribed client")
 	}
+}
+
+func TestHubResumeAndPrivatePairing(t *testing.T) {
+	h := New(2)
+	agent := &fakePeer{}
+	h.RegisterAgent(protocol.AgentHelloPayload{SessionID: "s1", RequirePairing: true}, agent.send)
+	resuming, other := &fakePeer{}, &fakePeer{}
+	h.RegisterClient("resume", resuming.send)
+	h.RegisterClient("other", other.send)
+	h.Subscribe("other", "s1", 0)
+
+	for _, target := range []string{"", "other", "resume"} {
+		challenge, _ := protocol.NewEnvelope(protocol.TypePairRequired, "s1", nil)
+		challenge.ClientID = target
+		h.HandleAgentEvent("s1", challenge)
+	}
+	if msgs := other.list(); len(msgs) != 1 || msgs[0].Type != protocol.TypePairRequired || msgs[0].ClientID != "other" || msgs[0].Seq != 0 {
+		t.Fatalf("expected only the targeted challenge without a sequence, got %#v", msgs)
+	}
+	if len(resuming.list()) != 0 || h.ListSessions()[0].LastSeq != 0 {
+		t.Fatal("pairing messages must stay outside the broadcast and replay ring")
+	}
+
+	delta, _ := protocol.NewEnvelope(protocol.TypeStreamDelta, "s1", nil)
+	h.HandleAgentEvent("s1", delta)
+	h.HandleAgentEvent("s1", delta)
+	h.HandleAgentEvent("s1", delta)
+	h.Subscribe("resume", "s1", 1)
+	if !expectHistoryRequest(t, agent, "resume").PairStatusOnly {
+		t.Fatal("resume should request only fresh pairing status after replay")
+	}
+	if msgs := resuming.list(); len(msgs) != 2 || msgs[0].Seq != 2 || msgs[1].Seq != 3 {
+		t.Fatalf("expected incremental replay from sequence 1, got %#v", msgs)
+	}
+
+	status, _ := protocol.NewEnvelope(protocol.TypePairStatus, "s1", map[string]bool{"paired": true})
+	status.ClientID = "resume"
+	h.HandleAgentEvent("s1", status)
+	if msgs := resuming.list(); len(msgs) != 3 || msgs[2].Type != protocol.TypePairStatus || msgs[2].Seq != 0 {
+		t.Fatalf("expected targeted pairing status, got %#v", msgs)
+	}
+	if msgs := other.list(); len(msgs) != 4 {
+		t.Fatalf("pairing status leaked to another client: %#v", msgs)
+	}
+
+	h.HandleAgentEvent("s1", delta)
+	for _, seq := range []uint64{1, 9} {
+		h.Subscribe("resume", "s1", seq)
+		if expectHistoryRequest(t, agent, "resume").PairStatusOnly {
+			t.Fatalf("sequence %d should request a fresh snapshot", seq)
+		}
+	}
+	if msgs := resuming.list(); len(msgs) != 4 {
+		t.Fatalf("unexpected replay with an unusable cursor: %#v", msgs)
+	}
+}
+
+func expectHistoryRequest(t *testing.T, agent *fakePeer, target string) protocol.HistoryRequestPayload {
+	t.Helper()
+	msgs := agent.list()
+	if len(msgs) == 0 {
+		t.Fatal("agent did not receive a history request")
+	}
+	env := msgs[len(msgs)-1]
+	payload, err := protocol.DecodePayload[protocol.HistoryRequestPayload](env.Payload)
+	if err != nil || env.Type != protocol.TypeHistoryRequest || env.ClientID != target || payload.ClientID != target {
+		t.Fatalf("expected history request for %q, got %#v and %v", target, env, err)
+	}
+	return payload
 }

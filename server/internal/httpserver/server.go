@@ -45,6 +45,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/healthz", s.handleHealth)
 	s.mux.HandleFunc("/readyz", s.handleHealth)
 	s.mux.HandleFunc("/api/sessions", s.handleSessions)
+	s.mux.HandleFunc("/api/browser-auth", s.handleBrowserAuth)
 	s.mux.HandleFunc("/ws/agent", s.handleAgentWS)
 	s.mux.HandleFunc("/ws/client", s.handleClientWS)
 
@@ -52,7 +53,13 @@ func (s *Server) routes() {
 	if err != nil {
 		panic(err)
 	}
-	s.mux.Handle("/", http.FileServer(http.FS(sub)))
+	static := http.FileServer(http.FS(sub))
+	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		static.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -67,6 +74,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -188,8 +196,18 @@ func (s *Server) handleClientWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !tokenMatches(s.cfg.ServerToken, hello.ServerToken, s.cfg.DevNoAuth) {
-		s.sendWSError(conn, "", "unauthorized", "invalid server token")
-		return
+		var cookie string
+		var expires time.Time
+		if hello.ServerToken == "" {
+			cookie, expires = verifyBrowserAuth(r, s.cfg.ServerToken, time.Now())
+		}
+		if expires.IsZero() {
+			s.sendWSError(conn, "", "unauthorized", "invalid server token")
+			return
+		}
+		hello.ClientID = browserClientID(s.cfg.ServerToken, cookie, hello.ClientID)
+		timer := time.AfterFunc(time.Until(expires), func() { _ = conn.Close() })
+		defer timer.Stop()
 	}
 	_ = conn.SetReadDeadline(time.Time{})
 

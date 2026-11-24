@@ -3,94 +3,127 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>pi-remote-control</title>
+  <meta name="color-scheme" content="light dark" />
+  <title>pi remote</title>
+  <link rel="stylesheet" href="/bootstrap-grid.min.css" />
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
   <div class="app-shell">
-    <aside id="sidebar" class="sidebar" aria-label="Connected pi sessions">
-      <div class="sidebar-header">
-        <div class="brand">
-          <span class="brand-dot" id="conn-dot" aria-hidden="true"></span>
-          <strong>pi-remote</strong>
-        </div>
-        <button id="btn-auth-settings" class="btn btn-ghost btn-sm" type="button">Token</button>
+    <aside id="sidebar" class="sidebar d-flex flex-column" aria-label="Workspace">
+      <div class="sidebar-header d-flex align-items-center">
+        <span class="brand-mark" aria-hidden="true">π</span>
+        <strong class="brand-name">pi remote</strong>
       </div>
-      <div class="sidebar-sub" id="conn-status-text">Disconnected</div>
-      <div class="session-list" id="session-list" role="listbox" aria-label="Sessions"></div>
+      <div class="session-controls">
+        <div class="session-heading d-flex align-items-center justify-content-between">
+          <h2 id="sessions-heading">Sessions</h2>
+          <span class="session-count" id="session-count" aria-label="Session count">0</span>
+        </div>
+        <label for="session-filter" class="visually-hidden">Find a session</label>
+        <input id="session-filter" class="session-filter" type="search" placeholder="Find a session" autocomplete="off" />
+      </div>
+      <nav class="session-list" id="session-list" aria-labelledby="sessions-heading"></nav>
+      <div class="sidebar-footer d-flex align-items-center justify-content-between">
+        <div class="connection d-flex align-items-center" role="status">
+          <span class="brand-dot" id="conn-dot" aria-hidden="true"></span>
+          <span id="conn-status-text">Disconnected</span>
+        </div>
+        <button id="btn-auth-settings" class="btn btn-ghost btn-sm" type="button">Connection</button>
+      </div>
     </aside>
 
-    <main class="main-pane">
-      <header class="topbar">
-        <button id="btn-toggle-sidebar" class="btn btn-ghost btn-sm mobile-only" type="button" aria-label="Toggle sessions">Sessions</button>
+    <button id="sidebar-overlay" class="sidebar-overlay" type="button" aria-label="Close sessions"></button>
+
+    <main class="main-pane d-flex flex-column">
+      <header class="topbar d-flex align-items-center">
+        <button id="btn-toggle-sidebar" class="btn btn-ghost btn-sm mobile-only" type="button" aria-controls="sidebar" aria-expanded="false">Sessions</button>
         <div class="session-meta">
-          <div id="active-session-title" class="session-title">No session selected</div>
+          <h1 id="active-session-title" class="session-title">No session selected</h1>
           <div id="active-session-sub" class="session-sub">Connect to a running pi session from the sidebar.</div>
         </div>
-        <div class="topbar-actions">
+        <div class="topbar-actions d-flex">
           <button id="btn-digest" class="btn btn-ghost btn-sm" type="button" disabled>Digest</button>
           <button id="btn-abort" class="btn btn-danger btn-sm" type="button" disabled>Abort</button>
         </div>
       </header>
 
-      <section id="pairing-banner" class="banner banner-warn hidden" aria-live="polite">
+      <section id="pairing-banner" class="banner banner-warn hidden" aria-labelledby="pair-title">
         <div class="banner-text">
-          <strong>Pairing required.</strong> Enter the 6-digit code shown in your local pi terminal:
+          <strong id="pair-title">Pair this session</strong>
+          <p id="pair-description" aria-live="polite">Enter the pairing code shown in the local pi terminal.</p>
+          <p id="pair-error" class="form-error hidden" role="alert"></p>
         </div>
-        <form id="pair-form" class="inline-form">
-          <input id="pair-code-input" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="123456" aria-label="Pairing code" required />
+        <form id="pair-form" class="inline-form d-flex align-items-center">
+          <label class="visually-hidden" for="pair-code-input">Pairing code</label>
+          <input id="pair-code-input" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="10" aria-describedby="pair-description pair-error" required />
           <button class="btn btn-primary btn-sm" type="submit">Pair</button>
         </form>
+        <button id="btn-retry-pairing" class="btn btn-ghost btn-sm hidden" type="button">Request new code</button>
       </section>
 
       <section id="approval-banner" class="banner banner-alert hidden" aria-live="assertive">
         <div class="banner-text">
-          <strong>Tool approval requested:</strong> <code id="approval-tool-name"></code>
-          <span id="approval-countdown" class="muted"></span>
+          <strong>Tool approval requested</strong>
+          <p><code id="approval-tool-name"></code> <span id="approval-countdown" class="muted"></span></p>
         </div>
-        <div class="banner-actions">
+        <div class="banner-actions d-flex align-items-center">
           <button id="btn-approve-tool" class="btn btn-primary btn-sm" type="button">Approve</button>
           <button id="btn-reject-tool" class="btn btn-danger btn-sm" type="button">Reject</button>
         </div>
       </section>
 
-      <section id="digest-panel" class="digest-panel hidden">
-        <div class="digest-header">
-          <strong>Work Digest</strong>
+      <section id="digest-panel" class="digest-panel hidden" aria-labelledby="digest-title">
+        <div class="digest-header d-flex align-items-center justify-content-between">
+          <h2 id="digest-title">Work digest</h2>
           <button id="btn-close-digest" class="btn btn-ghost btn-sm" type="button">Close</button>
         </div>
         <div id="digest-body" class="markdown-body"></div>
       </section>
 
-      <div id="timeline" class="timeline" aria-live="polite"></div>
+      <div class="conversation">
+        <section id="empty-state" class="empty-state" aria-live="polite">
+          <div class="empty-mark" aria-hidden="true">&gt;_</div>
+          <h2 id="empty-title">Choose a session</h2>
+          <p id="empty-description">Running pi sessions appear in the sidebar.</p>
+        </section>
+        <div id="timeline" class="timeline" role="log" aria-label="Conversation"></div>
+      </div>
 
       <form id="composer" class="composer">
-        <div id="attachment-preview" class="attachment-preview hidden"></div>
-        <div class="composer-row">
-          <label class="btn btn-ghost btn-sm file-btn" title="Attach image">
-            + Image
-            <input id="file-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden />
-          </label>
-          <select id="deliver-mode" class="select-sm" aria-label="Delivery mode when busy">
-            <option value="followUp">followUp</option>
-            <option value="steer">steer</option>
-          </select>
-          <textarea id="prompt-input" rows="2" placeholder="Send a prompt to pi... (Enter to send, Shift+Enter for newline)" disabled></textarea>
-          <button id="btn-send" class="btn btn-primary" type="submit" disabled>Send</button>
+        <div class="composer-card">
+          <label for="prompt-input" class="composer-label">Message</label>
+          <textarea id="prompt-input" rows="2" placeholder="Send a prompt to pi…" aria-describedby="composer-hint" disabled></textarea>
+          <div id="attachment-preview" class="attachment-preview hidden"></div>
+          <div class="composer-row d-flex align-items-center">
+            <input id="file-input" class="visually-hidden file-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple disabled />
+            <label for="file-input" class="btn btn-ghost btn-sm file-btn"><span aria-hidden="true">+</span> Image</label>
+            <label class="visually-hidden" for="deliver-mode">Delivery mode when busy</label>
+            <select id="deliver-mode" class="select-sm">
+              <option value="followUp">Follow up</option>
+              <option value="steer">Steer</option>
+            </select>
+            <button id="btn-send" class="btn btn-primary" type="submit" disabled>Send <span aria-hidden="true">↑</span></button>
+          </div>
         </div>
+        <div id="composer-hint" class="composer-hint">Enter to send · Shift+Enter for a new line</div>
       </form>
     </main>
   </div>
 
-  <dialog id="auth-dialog" class="dialog">
-    <form id="auth-form" method="dialog" class="dialog-body">
-      <h2>Relay Server Connection</h2>
-      <p class="muted">Enter your server token (or leave blank if server runs with <code>--dev-no-auth</code>).</p>
-      <label class="field">
-        <span>Server Token</span>
-        <input id="server-token-input" type="password" autocomplete="off" placeholder="PI_REMOTE_SERVER_TOKEN" />
+  <dialog id="auth-dialog" class="dialog" aria-labelledby="auth-title">
+    <form id="auth-form" method="dialog" class="dialog-body d-flex flex-column">
+      <div>
+        <h2 id="auth-title">Connect to the relay</h2>
+        <p class="muted">Enter your server token to access pi sessions from this browser.</p>
+      </div>
+      <label class="field d-flex flex-column" for="server-token-input">
+        <span>Server token</span>
+        <input id="server-token-input" type="password" autocomplete="off" aria-describedby="auth-error" />
       </label>
-      <div class="dialog-actions">
+      <p id="auth-error" class="form-error hidden" role="alert"></p>
+      <div class="dialog-actions d-flex align-items-center">
+        <button id="btn-sign-out" class="btn btn-danger hidden" type="button">Sign out</button>
         <button id="btn-auth-cancel" class="btn btn-ghost" type="button">Cancel</button>
         <button class="btn btn-primary" type="submit">Connect</button>
       </div>
@@ -99,6 +132,8 @@
 
   <script src="/markdown.js"></script>
   <script src="/ws.js"></script>
+  <script src="/conversation.js"></script>
+  <script src="/browser-auth.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

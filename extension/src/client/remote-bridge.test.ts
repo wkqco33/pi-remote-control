@@ -44,6 +44,7 @@ describe("RemoteBridge", () => {
 		await bridge.handleServerMessage({ type: "prompt.send", clientId: "web-1", text: "hack" });
 		expect(prompts).toHaveLength(0);
 		expect(notices[0]).toContain("123-456");
+		expect(sent[0]).toMatchObject({ type: "pair.required", clientId: "web-1" });
 		expect(JSON.stringify(sent)).not.toContain("123456");
 
 		await bridge.handleServerMessage({ type: "pair.submit", clientId: "web-1", code: "123456" });
@@ -51,6 +52,38 @@ describe("RemoteBridge", () => {
 		expect((sent.at(-1)?.payload as { ok: boolean }).ok).toBe(true);
 
 		await bridge.handleServerMessage({ type: "prompt.send", clientId: "web-1", text: "hello" });
+		expect(prompts).toEqual([{ text: "hello", deliverAs: undefined }]);
+	});
+
+	it("refreshes pairing state separately for each subscribed browser", async () => {
+		const { bridge, sent } = makeHarness();
+		await bridge.handleServerMessage({ type: "history.request", clientId: "web-1" });
+		expect(sent[0]).toMatchObject({
+			type: "history.snapshot", clientId: "web-1", payload: { paired: false },
+		});
+		await bridge.handleServerMessage({ type: "pair.submit", clientId: "web-1", code: "123456" });
+
+		const beforeRefresh = sent.length;
+		await bridge.handleServerMessage({ type: "history.request", clientId: "web-2" });
+		await bridge.handleServerMessage({ type: "history.request", clientId: "web-1", pairStatusOnly: true });
+		expect(sent.slice(beforeRefresh)).toMatchObject([
+			{ type: "history.snapshot", clientId: "web-2", payload: { paired: false } },
+			{ type: "pair.required", clientId: "web-2" },
+			{ type: "pair.status", clientId: "web-1", payload: { paired: true } },
+		]);
+
+		expect(bridge.disconnectAll()).toBe(1);
+		expect(sent.at(-1)).toMatchObject({ type: "pair.required", clientId: "web-1", payload: { reason: "pairing_revoked" } });
+	});
+
+	it("accepts prompts directly when the session disables pairing", async () => {
+		const { bridge, sent, notices, prompts } = makeHarness(false);
+		await bridge.handleServerMessage({ type: "history.request", clientId: "web-1" });
+		await bridge.handleServerMessage({ type: "prompt.send", clientId: "web-1", text: "hello" });
+		expect(sent).toMatchObject([
+			{ type: "history.snapshot", clientId: "web-1", payload: { paired: true } },
+		]);
+		expect(notices).toHaveLength(0);
 		expect(prompts).toEqual([{ text: "hello", deliverAs: undefined }]);
 	});
 

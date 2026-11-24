@@ -87,9 +87,8 @@ func (h *Hub) RegisterAgent(hello protocol.AgentHelloPayload, send SendFunc) uin
 	}
 	sessions := h.listSessionsLocked()
 	clients := h.snapshotClientsLocked()
-	h.mu.Unlock()
-
 	h.broadcastSessionsUpdate(clients, sessions)
+	h.mu.Unlock()
 	return gen
 }
 
@@ -105,7 +104,6 @@ func (h *Hub) UnregisterAgent(sessionID string, gen uint64, reason string) {
 	sessions := h.listSessionsLocked()
 	subs := h.subscribedClientsLocked(sessionID)
 	allClients := h.snapshotClientsLocked()
-	h.mu.Unlock()
 
 	if env, err := protocol.NewEnvelope(protocol.TypeSessionOffline, sessionID, protocol.SessionOfflinePayload{
 		SessionID: sessionID,
@@ -116,6 +114,7 @@ func (h *Hub) UnregisterAgent(sessionID string, gen uint64, reason string) {
 		}
 	}
 	h.broadcastSessionsUpdate(allClients, sessions)
+	h.mu.Unlock()
 }
 
 // RegisterClient registers a browser/API client and returns the initial welcome payload.
@@ -149,47 +148,44 @@ func (h *Hub) UnregisterClient(clientID string, gen uint64) {
 	delete(h.clients, clientID)
 }
 
-// Subscribe attaches a client to a session, replays missed events, and requests a fresh snapshot if needed.
+// Subscribe attaches a client to a session and restores history and pairing state.
 func (h *Hub) Subscribe(clientID string, sessionID string, lastSeq uint64) {
 	h.mu.Lock()
+	defer h.mu.Unlock()
+
 	client, ok := h.clients[clientID]
 	if !ok {
-		h.mu.Unlock()
 		return
 	}
 	client.subscriptions[sessionID] = struct{}{}
 	agent := h.agents[sessionID]
-	var replay []protocol.Envelope
-	var truncated bool
-	var agentSend SendFunc
-	if agent != nil {
-		replay, truncated = agent.ring.Since(lastSeq)
-		agentSend = agent.send
-	}
-	clientSend := client.send
-	h.mu.Unlock()
 
 	if agent == nil {
 		if env, err := protocol.NewEnvelope(protocol.TypeSessionOffline, sessionID, protocol.SessionOfflinePayload{
 			SessionID: sessionID,
 			Reason:    "session not connected",
 		}); err == nil {
-			clientSend(env)
+			client.send(env)
 		}
 		return
 	}
 
-	for _, item := range replay {
-		clientSend(item)
-	}
-
-	if lastSeq == 0 || truncated || len(replay) == 0 {
-		if req, err := protocol.NewEnvelope(protocol.TypeHistoryRequest, sessionID, protocol.HistoryRequestPayload{
-			ClientID: clientID,
-		}); err == nil {
-			req.ClientID = clientID
-			agentSend(req)
+	request := protocol.HistoryRequestPayload{ClientID: clientID}
+	if lastSeq > 0 && lastSeq <= agent.summary.LastSeq {
+		replay, truncated := agent.ring.Since(lastSeq)
+		if !truncated {
+			request.PairStatusOnly = true
+			for _, item := range replay {
+				if !client.send(item) {
+					request.PairStatusOnly = false
+					break
+				}
+			}
 		}
+	}
+	if req, err := protocol.NewEnvelope(protocol.TypeHistoryRequest, sessionID, request); err == nil {
+		req.ClientID = clientID
+		agent.send(req)
 	}
 }
 
@@ -238,28 +234,44 @@ func (h *Hub) HandleAgentEvent(sessionID string, env protocol.Envelope) {
 		}
 	}
 
-	// Targeted replies (e.g. history.snapshot for a newly subscribed tab, pair.result)
-	// go directly to the requesting client without polluting the shared ring buffer.
-	if env.ClientID != "" && (env.Type == protocol.TypeHistorySnapshot || env.Type == protocol.TypePairResult) {
+	// Pairing events are private to a subscribed client and have no replay sequence.
+	switch env.Type {
+	case protocol.TypePairRequired, protocol.TypePairStatus, protocol.TypePairResult:
 		target := h.clients[env.ClientID]
-		h.mu.Unlock()
 		if target != nil {
-			target.send(env)
+			if _, subscribed := target.subscriptions[sessionID]; subscribed {
+				env.Seq = 0
+				target.send(env)
+			}
 		}
+		h.mu.Unlock()
+		return
+	case protocol.TypeHistorySnapshot:
+		if env.ClientID == "" {
+			break
+		}
+		if target := h.clients[env.ClientID]; target != nil {
+			if _, subscribed := target.subscriptions[sessionID]; subscribed {
+				// A fresh snapshot replaces any older timeline or replay cursor.
+				env.Seq = agent.summary.LastSeq
+				target.send(env)
+			}
+		}
+		h.mu.Unlock()
 		return
 	}
 
 	sequenced := agent.ring.Push(env)
 	agent.summary.LastSeq = sequenced.Seq
-	subs := h.subscribedClientsLocked(sessionID)
-	h.mu.Unlock()
-
-	for _, c := range subs {
+	// Enqueue under the replay lock so a subscriber sees each event as
+	// either replay or live delivery.
+	for _, c := range h.subscribedClientsLocked(sessionID) {
 		c.send(sequenced)
 	}
 	if updateSessions != nil {
 		h.broadcastSessionsUpdate(allClients, updateSessions)
 	}
+	h.mu.Unlock()
 }
 
 // HandleClientCommand routes an inbound command from a client to the target agent.

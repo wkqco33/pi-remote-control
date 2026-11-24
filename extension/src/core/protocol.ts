@@ -48,10 +48,11 @@ export interface ApprovalResponsePayload {
 
 export interface HistoryRequestPayload {
 	readonly clientId?: string;
+	readonly pairStatusOnly?: boolean;
 }
 
 export type ServerInboundMessage =
-	| { readonly type: "history.request"; readonly clientId?: string }
+	| ({ readonly type: "history.request" } & HistoryRequestPayload)
 	| { readonly type: "pair.submit"; readonly clientId: string; readonly code: string }
 	| {
 			readonly type: "prompt.send";
@@ -90,7 +91,11 @@ export function parseServerEnvelope(raw: string): ServerInboundMessage | null {
 			return { type: "pong" };
 		case "history.request": {
 			const reqClient = typeof payload.clientId === "string" ? payload.clientId : clientId || undefined;
-			return reqClient === undefined ? { type: "history.request" } : { type: "history.request", clientId: reqClient };
+			return {
+				type: "history.request",
+				...(reqClient ? { clientId: reqClient } : {}),
+				...(payload.pairStatusOnly === true ? { pairStatusOnly: true } : {}),
+			};
 		}
 		case "pair.submit":
 			if (!clientId || typeof payload.code !== "string") return null;

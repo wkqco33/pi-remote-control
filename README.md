@@ -11,7 +11,7 @@ pi 세션 B (+ 확장) ──(아웃바운드 WSS)──▶ (첫 프레임 인�
                                                                                          웹 도구 승인, 다이제스트)
 ```
 
-- **`server/`**: Go 단일 바이너리 릴레이 서버 (`go:embed` 정적 웹 UI, `/ws/agent`, `/ws/client`, `/api/sessions`, `/healthz`, `/readyz`).
+- **`server/`**: 내장 웹 UI를 포함한 Go 단일 바이너리. UI는 Bootstrap Grid와 프로젝트 CSS를 함께 사용합니다.
 - **`extension/`**: 런타임 npm 의존성 제로의 TypeScript `pi` 확장 (Node 22+ 내장 `WebSocket`, `WsClient` + `RemoteBridge` + `/remote` 명령).
 
 ## 빠른 시작
@@ -19,29 +19,27 @@ pi 세션 B (+ 확장) ──(아웃바운드 WSS)──▶ (첫 프레임 인�
 ### 1. 릴레이 서버 실행
 
 ```bash
-export PI_REMOTE_SERVER_TOKEN="change-me-strong-token"
+export PI_REMOTE_SERVER_TOKEN="$(openssl rand -hex 32)"
 cd server
-go run ./cmd/pi-remote-server --addr :8787
+go run ./cmd/pi-remote-server
 ```
 
-개발 환경에서 토큰 없이 테스트할 때만 `--dev-no-auth` 플래그를 사용하세요.
+기본 수신 주소는 `127.0.0.1:8787`입니다. 루프백 개발 환경에서 토큰 없이 테스트할 때만 `--dev-no-auth` 플래그를 사용하세요.
 
 #### Docker Compose로 실행
 
 ```bash
-export PI_REMOTE_SERVER_TOKEN="change-me-strong-token"
 docker compose up -d --build
 ```
 
 ### 2. `pi` 확장 설치 및 연결
 
 ```bash
-export PI_REMOTE_SERVER_TOKEN="change-me-strong-token"
 export PI_REMOTE_SERVER_URL="ws://127.0.0.1:8787/ws/agent"
 pi install ./extension
 ```
 
-또는 npm / GitHub 저장소에서 바로 설치할 수 있습니다.
+다른 머신에서 확장을 실행할 때는 서버와 동일한 토큰을 안전한 방법으로 전달하고 `PI_REMOTE_SERVER_URL`에 공개 `wss://` 주소를 지정하세요. npm / GitHub 저장소에서도 설치할 수 있습니다.
 
 ```bash
 pi install npm:@wkqco33/pi-remote-control
@@ -71,13 +69,18 @@ pi install git:github.com/wkqco33/pi-remote-control
 | `remoteToolApproval` | `off` | 원격 턴 비읽기전용 도구 승인 (`off` \| `local` \| `web`) |
 | `approvalTimeoutMs` | `60000` | 웹/로컬 도구 승인 대기 제한 시간 (ms) |
 
-### 3. 웹 UI 접속 및 페어링
+### 3. 웹에서 세션 작업하기
 
-브라우저에서 `http://127.0.0.1:8787`로 접속해 `Token` 버튼으로 서버 토큰을 입력하고 세션을 선택하면 로컬 `pi` 터미널에 6자리 페어링 코드가 표시됩니다. 해당 코드를 웹 UI에 입력하면 원격 프롬프트(`followUp` / `steer`), 실시간 스트리밍, 웹 도구 승인, 이미지 첨부, 작업 다이제스트를 사용할 수 있습니다.
+브라우저에서 `http://127.0.0.1:8787`에 접속해 서버 토큰을 입력합니다. 브라우저는 30일 동안 로그인을 기억하며, `Connection → Sign out`에서 로그아웃할 수 있습니다.
+
+신뢰하는 개인 릴레이에서 토큰만으로 작업하려면 각 `pi` 세션에 적용되는 `~/.pi/agent/remote-control.json` 또는 `<project>/.pi/remote-control.json`에 `"requirePairing": false`를 설정한 뒤 확장을 다시 시작하세요. 해당 세션은 릴레이에 인증한 모든 클라이언트가 제어할 수 있습니다. 기본 설정에서는 로컬 `pi` 터미널에 나온 코드를 웹에 입력합니다. 로그인은 브라우저 프로필에서 공유되며, 페어링은 현재 로그인 쿠키와 탭, 실행 중인 `pi` 세션 단위로 유지됩니다. 페어링을 사용하는 배포는 릴레이와 `pi` 확장을 함께 업데이트하세요.
+
+사이드바에서 세션을 검색하고 전환할 수 있습니다. 같은 페이지에서 열어 본 세션은 대화 수신을 계속하고, 작성 중인 메시지와 첨부는 세션별로 유지됩니다. 바쁜 세션에는 `Follow up`이나 `Steer`로 메시지를 보낼 수 있습니다.
 
 ## 보안 모델
 
-- **이중 인증:** 릴레이 서버 접속 시 첫 프레임 `serverToken` 검증 + 세션별 로컬 터미널 전용 6자리 페어링 코드 검증.
+- **외부 접속:** 리버스 프록시에서 HTTPS/WSS를 제공하고, 브라우저가 보낸 공개 `Host`를 업스트림에 전달하세요. 원본 릴레이 포트는 루프백이나 프록시 전용 네트워크에서만 접근할 수 있게 구성하세요. 외부 공개 세션에서는 기본값 `requirePairing: true`를 권장합니다.
+- **릴레이 인증:** 웹은 서명된 HttpOnly 쿠키로 접속하고, 에이전트와 기타 클라이언트는 첫 프레임으로 릴레이 토큰을 전달합니다. 기본 설정에서는 세션별 터미널 페어링도 적용됩니다.
 - **프롬프트 인젝션 방어:** 원격 턴에 `remoteToolPolicy` 및 `remoteToolApproval` 적용.
 - **시크릿 보호:** 송신 스트림·히스토리·다이제스트에 `redactSecrets` 적용, 쿼리스트링 토큰 금지. 자세한 내용은 [SECURITY.md](SECURITY.md)를 참고하세요.
 

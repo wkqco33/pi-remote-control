@@ -10,33 +10,34 @@ const ProtocolVersion = 1
 
 // Message types shared across Go relay, TypeScript extension, and Web UI.
 const (
-	TypeAgentHello        = "agent.hello"
-	TypeClientHello       = "client.hello"
-	TypeClientWelcome     = "client.welcome"
-	TypeSessionsUpdate    = "sessions.update"
-	TypeSessionSubscribe  = "session.subscribe"
-	TypeSessionUnsub      = "session.unsubscribe"
-	TypeSessionState      = "session.state"
-	TypeSessionOffline    = "session.offline"
-	TypeHistoryRequest    = "history.request"
-	TypeHistorySnapshot   = "history.snapshot"
-	TypeStreamStart       = "stream.start"
-	TypeStreamDelta       = "stream.delta"
-	TypeStreamEnd         = "stream.end"
-	TypeToolStart         = "tool.start"
-	TypeToolEnd           = "tool.end"
-	TypeApprovalRequest   = "approval.request"
-	TypeApprovalResponse  = "approval.response"
-	TypeDigestRequest     = "digest.request"
-	TypeDigestSnapshot    = "digest.snapshot"
-	TypePairRequired      = "pair.required"
-	TypePairSubmit        = "pair.submit"
-	TypePairResult        = "pair.result"
-	TypePromptSend        = "prompt.send"
-	TypeTurnAbort         = "turn.abort"
-	TypeError             = "error"
-	TypePing              = "ping"
-	TypePong              = "pong"
+	TypeAgentHello       = "agent.hello"
+	TypeClientHello      = "client.hello"
+	TypeClientWelcome    = "client.welcome"
+	TypeSessionsUpdate   = "sessions.update"
+	TypeSessionSubscribe = "session.subscribe"
+	TypeSessionUnsub     = "session.unsubscribe"
+	TypeSessionState     = "session.state"
+	TypeSessionOffline   = "session.offline"
+	TypeHistoryRequest   = "history.request"
+	TypeHistorySnapshot  = "history.snapshot"
+	TypeStreamStart      = "stream.start"
+	TypeStreamDelta      = "stream.delta"
+	TypeStreamEnd        = "stream.end"
+	TypeToolStart        = "tool.start"
+	TypeToolEnd          = "tool.end"
+	TypeApprovalRequest  = "approval.request"
+	TypeApprovalResponse = "approval.response"
+	TypeDigestRequest    = "digest.request"
+	TypeDigestSnapshot   = "digest.snapshot"
+	TypePairRequired     = "pair.required"
+	TypePairStatus       = "pair.status"
+	TypePairSubmit       = "pair.submit"
+	TypePairResult       = "pair.result"
+	TypePromptSend       = "prompt.send"
+	TypeTurnAbort        = "turn.abort"
+	TypeError            = "error"
+	TypePing             = "ping"
+	TypePong             = "pong"
 )
 
 // Envelope is the wire frame for all WebSocket messages.
@@ -109,7 +110,8 @@ type SessionOfflinePayload struct {
 }
 
 type HistoryRequestPayload struct {
-	ClientID string `json:"clientId,omitempty"`
+	ClientID       string `json:"clientId,omitempty"`
+	PairStatusOnly bool   `json:"pairStatusOnly,omitempty"`
 }
 
 type PromptImage struct {
