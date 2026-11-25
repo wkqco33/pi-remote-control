@@ -1,6 +1,6 @@
 {
   "name": "@wkqco33/pi-remote-control",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Remote control extension for pi coding agent: stream live sessions, steer/followUp prompts, and approve tool calls from a web relay server.",
   "type": "module",
   "license": "MIT",
