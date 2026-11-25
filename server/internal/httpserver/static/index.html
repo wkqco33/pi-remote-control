@@ -69,6 +69,7 @@
           <p><code id="approval-tool-name"></code> <span id="approval-countdown" class="muted"></span></p>
         </div>
         <div class="banner-actions d-flex align-items-center">
+          <button id="btn-enable-alerts" class="btn btn-ghost btn-sm hidden" type="button" title="Show a notification when approval is needed while this tab is hidden">Enable alerts</button>
           <button id="btn-approve-tool" class="btn btn-primary btn-sm" type="button">Approve</button>
           <button id="btn-auto-approve-tool" class="btn btn-ghost btn-sm" type="button">Auto-approve</button>
           <button id="btn-reject-tool" class="btn btn-danger btn-sm" type="button">Reject</button>
@@ -90,6 +91,7 @@
           <p id="empty-description">Running pi sessions appear in the sidebar.</p>
         </section>
         <div id="timeline" class="timeline" role="log" aria-label="Conversation"></div>
+        <button id="btn-jump-latest" class="btn btn-primary btn-sm jump-latest hidden" type="button">Jump to latest <span aria-hidden="true">↓</span></button>
       </div>
 
       <form id="composer" class="composer">
@@ -135,6 +137,9 @@
   <script src="/markdown.js"></script>
   <script src="/ws.js"></script>
   <script src="/conversation.js"></script>
+  <script src="/approval.js"></script>
+  <script src="/notify.js"></script>
+  <script src="/sessions.js"></script>
   <script src="/browser-auth.js"></script>
   <script src="/app.js"></script>
 </body>

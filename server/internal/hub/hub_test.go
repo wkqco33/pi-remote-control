@@ -175,3 +175,21 @@ func expectHistoryRequest(t *testing.T, agent *fakePeer, target string) protocol
 	}
 	return payload
 }
+
+func TestSessionStatePropagatesAutoApprove(t *testing.T) {
+	h := New(8)
+	off, on := false, true
+	h.RegisterAgent(protocol.AgentHelloPayload{SessionID: "s1", AutoApprove: &off}, func(protocol.Envelope) bool { return true })
+	if got := h.ListSessions()[0].AutoApprove; got == nil || *got {
+		t.Fatalf("expected autoApprove=false from hello, got %v", got)
+	}
+
+	env, err := protocol.NewEnvelope(protocol.TypeSessionState, "s1", protocol.SessionStatePayload{State: "busy", AutoApprove: &on})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.HandleAgentEvent("s1", env)
+	if got := h.ListSessions()[0].AutoApprove; got == nil || !*got {
+		t.Fatalf("expected autoApprove=true after session.state, got %v", got)
+	}
+}

@@ -13,6 +13,7 @@ describe("status", () => {
 			pendingPairings: 0,
 			remoteToolPolicy: "unrestricted",
 			remoteToolApproval: "web",
+			autoApprove: false,
 		});
 		expect(report).toContain("pi-remote-control status: connected");
 		expect(report).toContain("toolPolicy: unrestricted (approval: web)");

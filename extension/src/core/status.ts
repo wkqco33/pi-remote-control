@@ -12,6 +12,7 @@ export interface StatusSnapshot {
 	readonly pendingPairings: number;
 	readonly remoteToolPolicy: string;
 	readonly remoteToolApproval: string;
+	readonly autoApprove: boolean;
 	readonly lastError?: string;
 }
 
@@ -32,6 +33,7 @@ export function formatStatusReport(s: StatusSnapshot): string {
 		`- trustedClients: ${s.trustedClients}`,
 		`- pendingPairings: ${s.pendingPairings}`,
 		`- toolPolicy: ${s.remoteToolPolicy} (approval: ${s.remoteToolApproval})`,
+		`- autoApprove: ${s.autoApprove ? "on" : "off"}`,
 	];
 	if (s.lastError) lines.push(`- lastError: ${s.lastError}`);
 	return lines.join("\n");

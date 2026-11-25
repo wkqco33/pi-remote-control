@@ -25,6 +25,15 @@ export function remoteToolBlockReason(policy: RemoteToolPolicy, toolName: string
 	return `Tool '${toolName}' is blocked for remote turns (read-only policy).`;
 }
 
-export function remoteToolDeclinedReason(toolName: string): string {
+export type ApprovalReason = "user" | "auto" | "timeout" | "cancelled";
+
+export function remoteToolDeclinedReason(toolName: string, reason?: ApprovalReason): string {
+	if (reason === "user") return `Remote tool '${toolName}' was declined by the user.`;
+	if (reason === "timeout") {
+		return `Remote tool '${toolName}' was not run: no approval response before the timeout (the command itself did not run).`;
+	}
+	if (reason === "cancelled") {
+		return `Remote tool '${toolName}' was not run: the approval was cancelled (relay disconnected or access revoked).`;
+	}
 	return `Remote tool '${toolName}' was declined or timed out.`;
 }

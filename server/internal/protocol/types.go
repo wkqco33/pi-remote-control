@@ -27,6 +27,8 @@ const (
 	TypeToolEnd          = "tool.end"
 	TypeApprovalRequest  = "approval.request"
 	TypeApprovalResponse = "approval.response"
+	TypeApprovalMode     = "approval.mode"
+	TypeApprovalResolved = "approval.resolved"
 	TypeDigestRequest    = "digest.request"
 	TypeDigestSnapshot   = "digest.snapshot"
 	TypePairRequired     = "pair.required"
@@ -60,6 +62,7 @@ type AgentHelloPayload struct {
 	Model           string `json:"model,omitempty"`
 	State           string `json:"state"`
 	RequirePairing  bool   `json:"requirePairing"`
+	AutoApprove     *bool  `json:"autoApprove,omitempty"`
 	ProtocolVersion int    `json:"protocolVersion"`
 }
 
@@ -80,6 +83,8 @@ type SessionSummary struct {
 	RequirePairing bool   `json:"requirePairing"`
 	ConnectedAt    int64  `json:"connectedAt"`
 	LastSeq        uint64 `json:"lastSeq"`
+	// AutoApprove is nil for agents that predate agent-side auto-approve.
+	AutoApprove *bool `json:"autoApprove,omitempty"`
 }
 
 type ClientWelcomePayload struct {
@@ -102,6 +107,7 @@ type SessionStatePayload struct {
 	Branch      string `json:"branch,omitempty"`
 	Model       string `json:"model,omitempty"`
 	RunningTool string `json:"runningTool,omitempty"`
+	AutoApprove *bool  `json:"autoApprove,omitempty"`
 }
 
 type SessionOfflinePayload struct {

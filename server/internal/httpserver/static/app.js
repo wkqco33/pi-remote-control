@@ -34,9 +34,21 @@
   const client = new window.PiRelayClient({
     clientId: browserClientId(),
     onStatus: updateConnection,
-    onEnvelope: handleEnvelope,
+    onEnvelope: (env) => {
+      handleEnvelope(env);
+      if (env.type.startsWith("approval.")) notifier.refresh();
+    },
   });
   const conversation = window.PiConversation;
+  const approvals = window.PiApproval;
+  const sessionList = window.PiSessionList;
+  const notifier = window.PiNotifier.create({
+    approvals,
+    views: () => views.values(),
+    button: byId("btn-enable-alerts"),
+    onOpen: (view) => { if (view.summary) selectSession(view.summary); },
+  });
+  const follower = window.PiConversation.createFollower(timeline, byId("btn-jump-latest"));
   const updateAuth = window.PiBrowserAuth({
     connect: () => client.connect(),
     signedOut: resetWorkspace,
@@ -59,48 +71,15 @@
   }
 
   function renderSessions() {
-    const list = byId("session-list");
-    const query = byId("session-filter").value.trim().toLowerCase();
-    const shown = sessions.filter((s) =>
-      [s.sessionName, s.sessionId, s.host, s.cwd, s.branch, s.model].some((part) => part?.toLowerCase().includes(query)));
     label("session-count", sessions.length);
-    const focused = list.contains(document.activeElement) ? document.activeElement.dataset.sessionId : null;
-    list.replaceChildren();
-    if (shown.length === 0) {
-      const message = document.createElement("p");
-      message.className = "session-list-empty muted";
-      message.textContent = connection === "connected" ?
+    sessionList.render(byId("session-list"), {
+      sessions: sessionList.filter(sessions, byId("session-filter").value),
+      activeId: active?.id,
+      emptyMessage: connection === "connected" ?
         (sessions.length ? "No matching sessions." : "No sessions online.") :
-        labelForConnection();
-      list.appendChild(message);
-      return;
-    }
-    for (const s of shown) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.dataset.sessionId = s.sessionId;
-      button.className = "session-item";
-      if (s.sessionId === active?.id) {
-        button.classList.add("active");
-        button.setAttribute("aria-current", "true");
-      }
-      const top = document.createElement("div");
-      top.className = "session-item-top";
-      const title = document.createElement("strong");
-      title.textContent = s.sessionName || s.cwd?.split("/").filter(Boolean).pop() || s.sessionId.slice(0, 8);
-      const state = document.createElement("span");
-      state.className = s.state === "busy" ? "badge busy" : "badge idle";
-      state.textContent = s.state === "busy" ? "Busy" : "Idle";
-      top.append(title, state);
-      const meta = document.createElement("div");
-      meta.className = "session-item-meta";
-      meta.textContent = [s.host, s.cwd].filter(Boolean).join(" · ");
-      button.title = meta.textContent;
-      button.append(top, meta);
-      button.addEventListener("click", () => selectSession(s));
-      list.appendChild(button);
-      if (focused === s.sessionId) button.focus({ preventScroll: true });
-    }
+        labelForConnection(),
+      onSelect: selectSession,
+    });
   }
 
   function labelForConnection() {
@@ -117,7 +96,7 @@
         view.challenge = null;
         view.pairError = "";
         view.awaitingPair = false;
-        view.approval = null;
+        view.approvals = [];
         view.digest = "";
         view.digestOpen = false;
         view.loading = Boolean(summary);
@@ -136,14 +115,18 @@
   function selectSession(summary) {
     const sidebarWasOpen = byId("sidebar").classList.contains("open");
     closeSidebar();
-    if (active) active.scroll = nearLatestMessage() ? null : timeline.scrollTop;
+    if (active) active.scroll = follower.atLatest() ? null : timeline.scrollTop;
     let view = views.get(summary.sessionId);
     if (!view) {
       const thread = document.createElement("div");
       thread.className = "conversation-thread";
       view = {
         id: summary.sessionId, summary, thread, scroll: null, draft: "",
-        mode: "followUp", images: [], loading: true, autoApprove: false,
+        mode: "followUp", images: [], loading: true, approvals: [], localAuto: false,
+      };
+      view.onRender = (render) => {
+        if (view === active) follower.keep(render);
+        else render();
       };
       views.set(view.id, view);
       client.subscribe(view.id);
@@ -161,6 +144,7 @@
     renderSessions();
     renderActive();
     timeline.scrollTop = active.scroll ?? timeline.scrollHeight;
+    follower.update();
     if (sidebarWasOpen) byId("btn-toggle-sidebar").focus();
   }
 
@@ -171,7 +155,7 @@
   function renderActive() {
     const summary = active?.summary;
     const enabled = controllable(active);
-    const title = summary && (summary.sessionName || summary.cwd?.split("/").filter(Boolean).pop() || summary.sessionId);
+    const title = summary && sessionList.title(summary);
     label("active-session-title", title || (active ? "Session offline" : "No session selected"));
     label("active-session-sub", summary ?
       [summary.host, summary.cwd, summary.branch, summary.model, summary.runningTool].filter(Boolean).join(" · ") :
@@ -180,7 +164,7 @@
     fileInput.disabled = !enabled;
     mode.disabled = !enabled;
     const autoBtn = byId("btn-auto-approve");
-    const autoOn = Boolean(active?.autoApprove);
+    const autoOn = approvals.isAuto(active);
     autoBtn.disabled = !enabled;
     autoBtn.setAttribute("aria-pressed", String(autoOn));
     autoBtn.classList.toggle("is-active", autoOn);
@@ -220,6 +204,7 @@
   }
 
   function renderBanners() {
+    notifier.refresh();
     const pair = client.ready && active?.summary?.requirePairing && active.paired === false;
     const challenge = pair && active.challenge;
     const validCode = challenge && challenge.expiresAt > Date.now();
@@ -235,7 +220,7 @@
       pairInput.disabled = active.awaitingPair === true;
       byId("pair-form").querySelector("button").disabled = pairInput.disabled;
     }
-    const approval = controllable(active) && active.approval;
+    const approval = controllable(active) && !approvals.isAuto(active) && approvals.current(active);
     const seconds = approval ? Math.ceil((approval.expiresAt - Date.now()) / 1000) : 0;
     hide("approval-banner", seconds <= 0);
     if (seconds > 0) {
@@ -248,10 +233,6 @@
     const body = byId("digest-body");
     body.dataset.sessionId = active?.id || "";
     body.innerHTML = window.PiMarkdown.render(active?.digest);
-  }
-
-  function nearLatestMessage() {
-    return timeline.scrollHeight - timeline.clientHeight - timeline.scrollTop < 96;
   }
 
   function handleEnvelope(env) {
@@ -267,7 +248,7 @@
       return;
     }
     if (!view) return;
-    const nearBottom = view === active && nearLatestMessage();
+    const nearBottom = view === active && follower.atLatest();
     switch (env.type) {
       case "history.snapshot":
         view.loading = false;
@@ -299,12 +280,11 @@
         if (view === active) pairInput.value = "";
         break;
       case "approval.request":
-        if (controllable(view) && view.autoApprove && payload.requestId) {
-          sendTo(view, "approval.response", { requestId: payload.requestId, approved: true });
-          view.approval = null;
-        } else {
-          view.approval = { ...payload, expiresAt: (env.ts || Date.now()) + (payload.timeoutMs || 60000) };
-        }
+        approvals.add(view, env);
+        if (controllable(view)) approvals.answerLegacyAuto(view, sendTo);
+        break;
+      case "approval.resolved":
+        approvals.resolve(view, payload.requestId);
         break;
       case "digest.snapshot":
         view.digest = payload.markdown || "";
@@ -319,7 +299,8 @@
     }
     if (view === active) {
       renderActive();
-      if (nearBottom || env.type === "history.snapshot") timeline.scrollTop = timeline.scrollHeight;
+      if (nearBottom || env.type === "history.snapshot") follower.jump();
+      else follower.update();
     }
   }
 
@@ -334,29 +315,21 @@
   }
 
   function respondApproval(approved) {
-    if (!controllable(active) || !active.approval || active.approval.expiresAt <= Date.now()) return;
-    if (sendTo(active, "approval.response", { requestId: active.approval.requestId, approved })) {
-      active.approval = null;
-      renderBanners();
-    }
+    const pending = approvals.current(active);
+    if (!controllable(active) || !pending) return;
+    if (approvals.respond(active, pending.requestId, approved, sendTo)) renderBanners();
+  }
+
+  function setAutoApprove(enabled) {
+    if (!controllable(active)) return;
+    approvals.setAuto(active, enabled, sendTo);
+    renderActive();
   }
 
   byId("btn-approve-tool").onclick = () => respondApproval(true);
-  byId("btn-auto-approve-tool").onclick = () => {
-    if (!controllable(active)) return;
-    active.autoApprove = true;
-    respondApproval(true);
-    renderActive();
-  };
+  byId("btn-auto-approve-tool").onclick = () => setAutoApprove(true);
   byId("btn-reject-tool").onclick = () => respondApproval(false);
-  byId("btn-auto-approve").onclick = () => {
-    if (!controllable(active)) return;
-    active.autoApprove = !active.autoApprove;
-    if (active.autoApprove && active.approval && active.approval.expiresAt > Date.now()) {
-      respondApproval(true);
-    }
-    renderActive();
-  };
+  byId("btn-auto-approve").onclick = () => setAutoApprove(!approvals.isAuto(active));
   byId("pair-form").onsubmit = (event) => {
     event.preventDefault();
     const code = pairInput.value.replace(/[\s-]+/g, "");
@@ -428,7 +401,7 @@
       active.images = [];
       renderAttachments();
       renderActive();
-      timeline.scrollTop = timeline.scrollHeight;
+      follower.jump();
     }
   }
 
@@ -479,6 +452,10 @@
     client.clientId = browserClientId();
     updateConnection("unauthorized");
   }
+
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) client.resume(); });
+  window.addEventListener("online", () => client.resume());
+  window.addEventListener("pageshow", () => client.resume());
 
   setInterval(renderBanners, 1000);
   client.connect();
