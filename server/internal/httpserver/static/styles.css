@@ -14,6 +14,9 @@
   --primary-hover: #1d4935;
   --on-primary: #ffffff;
   --focus: #27664c;
+  --tok-keyword: #6b3d99;
+  --tok-string: #205a40;
+  --tok-number: #8a4b0f;
   --negative: #9b3535;
   --negative-bg: #fcf0ee;
   --warning: #7b5010;
@@ -53,6 +56,9 @@
     --primary-hover: #b9eaca;
     --on-primary: #152c1e;
     --focus: #a5dcb9;
+    --tok-keyword: #d3b3f5;
+    --tok-string: #a5dcb9;
+    --tok-number: #f4cf85;
     --negative: #ffada9;
     --negative-bg: #392626;
     --warning: #f4cf85;
@@ -321,6 +327,40 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
   overflow-wrap: normal;
 }
 .markdown-body code { font-family: var(--font-mono); font-size: 0.875em; }
+.markdown-body :not(pre) > code { padding: 0.1em 0.3em; border-radius: 0.25rem; background: var(--raised); }
+.markdown-body :is(h1, h2, h3, h4, h5, h6) { margin: var(--s3) 0 var(--s2); font-size: 1rem; line-height: 1.35; }
+.markdown-body h1 { font-size: 1.375rem; }
+.markdown-body h2 { font-size: 1.2rem; }
+.markdown-body h3 { font-size: 1.075rem; }
+.markdown-body > :is(h1, h2, h3, h4, h5, h6):first-child { margin-top: 0; }
+.markdown-body :is(ul, ol) { padding-left: var(--s6); }
+.markdown-body li + li, .markdown-body li > :is(p, ul, ol, pre, blockquote, .md-table) { margin-top: var(--s1); }
+.markdown-body blockquote { padding-left: var(--s3); border-left: 3px solid var(--border); color: var(--muted); }
+.markdown-body blockquote > * + * { margin-top: var(--s2); }
+.markdown-body hr { border: 0; border-top: 1px solid var(--border); }
+.markdown-body a { color: var(--accent); text-underline-offset: 0.15em; }
+.markdown-body .md-table { overflow-x: auto; }
+.markdown-body table { border-collapse: collapse; }
+.markdown-body :is(th, td) {
+  padding: var(--s1) var(--s3);
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: normal;
+  /* Keep narrow columns readable: the table scrolls instead of squeezing them. */
+  min-width: 7rem;
+  word-break: keep-all;
+}
+.markdown-body th { background: var(--raised); }
+.markdown-body .footnotes { padding-top: var(--s2); border-top: 1px solid var(--border); color: var(--muted); font-size: 0.875em; }
+.markdown-body .tok-comment { color: var(--muted); font-style: italic; }
+.markdown-body .tok-keyword { color: var(--tok-keyword); }
+.markdown-body .tok-string { color: var(--tok-string); }
+.markdown-body .tok-number { color: var(--tok-number); }
+.markdown-body .tok-added { color: var(--accent); }
+.markdown-body .tok-removed { color: var(--negative); }
+.markdown-body .align-center { text-align: center; }
+.markdown-body .align-right { text-align: right; }
 
 .composer { flex: none; padding: var(--s2) var(--page-gutter) max(var(--s3), env(safe-area-inset-bottom)); }
 .composer-card {
