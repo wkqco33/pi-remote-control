@@ -57,7 +57,10 @@ func (s *Server) routes() {
 	if err != nil {
 		panic(err)
 	}
-	static := http.FileServer(http.FS(sub))
+	static, err := newStaticHandler(sub)
+	if err != nil {
+		panic(err)
+	}
 	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 		w.Header().Set("Referrer-Policy", "no-referrer")
