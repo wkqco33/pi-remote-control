@@ -193,3 +193,32 @@ func TestSessionStatePropagatesAutoApprove(t *testing.T) {
 		t.Fatalf("expected autoApprove=true after session.state, got %v", got)
 	}
 }
+
+func TestCommandCatalogReachesOnlyTheRequester(t *testing.T) {
+	h := New(8)
+	h.RegisterAgent(protocol.AgentHelloPayload{SessionID: "s1"}, func(protocol.Envelope) bool { return true })
+	received := map[string]int{}
+	for _, id := range []string{"a", "b"} {
+		h.RegisterClient(id, func(env protocol.Envelope) bool {
+			if env.Type == protocol.TypeCommandsSnapshot {
+				received[id]++
+			}
+			return true
+		})
+		h.Subscribe(id, "s1", 0)
+	}
+
+	env, err := protocol.NewEnvelope(protocol.TypeCommandsSnapshot, "s1", map[string]any{"commands": []string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.ClientID = "a"
+	h.HandleAgentEvent("s1", env)
+
+	if received["a"] != 1 || received["b"] != 0 {
+		t.Fatalf("unexpected delivery: %v", received)
+	}
+	if got := h.ListSessions()[0].LastSeq; got != 0 {
+		t.Fatalf("catalog must not enter the replay buffer, lastSeq=%d", got)
+	}
+}

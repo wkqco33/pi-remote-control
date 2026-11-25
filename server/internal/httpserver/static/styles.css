@@ -333,6 +333,28 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
   box-shadow: var(--shadow);
 }
 .composer-card:focus-within { border-color: var(--focus); }
+.command-menu {
+  max-height: min(16rem, 35vh);
+  margin: 0 0 var(--s2);
+  padding: var(--s1);
+  overflow: auto;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--raised);
+}
+.command-menu li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s3);
+  padding: var(--s2);
+  border-radius: var(--radius-sm);
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+.command-menu li strong { flex: none; max-width: 70%; font-family: var(--font-mono); overflow-wrap: anywhere; }
+.command-menu li span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.command-menu li:hover, .command-menu li[aria-selected="true"] { background: var(--selected); }
 .composer-label { display: block; padding: 0 var(--s1); color: var(--muted); font-size: 0.8125rem; font-weight: 650; }
 .composer textarea {
   display: block;

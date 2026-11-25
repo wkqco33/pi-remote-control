@@ -173,6 +173,9 @@
         }
         closeSegment(view);
         break;
+      case "command.result":
+        appendMessage(view, "system", payload.message || `/${payload.command} finished`);
+        break;
       case "tool.start":
         startTool(view, payload);
         break;

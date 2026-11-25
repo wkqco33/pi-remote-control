@@ -5,7 +5,7 @@
 ## 개발 환경 요구사항
 
 - **Go** `1.24+` (`server/`)
-- **Node.js** `22.0+` (`extension/`, 내장 `WebSocket` 사용)
+- **Node.js** `22.19+` (`extension/`, 내장 `WebSocket` 사용)
 - **Task** (`Taskfile.yml` 실행용, 선택)
 
 ## 로컬 검증

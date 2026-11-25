@@ -174,6 +174,27 @@ export default async function remoteControlExtension(pi: ExtensionAPI): Promise<
 			get model() {
 				return ctx.model?.id;
 			},
+			listCommands: () => pi.getCommands(),
+			listModels: () => ctx.modelRegistry.getAvailable().map((model) => `${model.provider}/${model.id}`),
+			async setModel(reference) {
+				const available = ctx.modelRegistry.getAvailable();
+				const exact = available.filter((model) => `${model.provider}/${model.id}` === reference);
+				const matches = exact.length > 0 ? exact : available.filter((model) => model.id === reference);
+				const [model] = matches;
+				if (!model) return "not_found";
+				if (matches.length > 1) return "ambiguous";
+				return (await pi.setModel(model)) ? "ok" : "no_auth";
+			},
+			getThinkingLevel: () => pi.getThinkingLevel(),
+			setThinkingLevel: (level) => pi.setThinkingLevel(level),
+			compact: (instructions) =>
+				new Promise<void>((resolve, reject) => {
+					(sessionCtx ?? ctx).compact({
+						...(instructions ? { customInstructions: instructions } : {}),
+						onComplete: () => resolve(),
+						onError: reject,
+					});
+				}),
 			isIdle: () => (sessionCtx ? sessionCtx.isIdle() : true),
 			sendPrompt(text, options) {
 				const content =
@@ -188,13 +209,12 @@ export default async function remoteControlExtension(pi: ExtensionAPI): Promise<
 							]
 						: text;
 				try {
-					if (options?.deliverAs) {
-						pi.sendUserMessage(content, { deliverAs: options.deliverAs });
-					} else if (sessionCtx && !sessionCtx.isIdle()) {
-						pi.sendUserMessage(content, { deliverAs: "followUp" });
-					} else {
-						pi.sendUserMessage(content);
-					}
+					const deliverAs =
+						options?.deliverAs ?? (sessionCtx && !sessionCtx.isIdle() ? ("followUp" as const) : undefined);
+					pi.sendUserMessage(content, {
+						...(deliverAs ? { deliverAs } : {}),
+						...(options?.expandPromptTemplates ? { expandPromptTemplates: true } : {}),
+					});
 				} catch (error) {
 					ctx.ui.notify(
 						`[remote] failed to inject prompt: ${error instanceof Error ? error.message : String(error)}`,
@@ -283,7 +303,7 @@ export default async function remoteControlExtension(pi: ExtensionAPI): Promise<
 
 	pi.on("before_agent_start", async (event, ctx) => {
 		sessionCtx = ctx;
-		lastPrompt = event.prompt;
+		if (event.messageType === "user") lastPrompt = event.prompt;
 	});
 
 	pi.on("agent_start", async (_event, ctx) => {
