@@ -4,21 +4,26 @@
  */
 
 import type { RemoteControlConfig } from "../config.js";
+import type { CommandInfo } from "../core/commands.js";
 import { createChallenge, formatChallengeCode, verifyChallenge, type PendingChallenge } from "../core/pairing.js";
 import type { DeliverMode, HistoryItem, PromptImage, ServerInboundMessage, WireEnvelope } from "../core/protocol.js";
 import { redactSecrets } from "../core/redact.js";
 import type { ApprovalReason } from "../core/tool-policy.js";
 import type { ConnectionStatus, StatusSnapshot } from "../core/status.js";
+import type { BuiltinHost } from "./command-handler.js";
+import { PromptRouter } from "./prompt-router.js";
 
-export interface RemoteHost {
+export interface RemoteHost extends BuiltinHost {
 	readonly sessionId: string;
 	readonly sessionName?: string;
 	readonly host: string;
 	readonly cwd: string;
 	readonly branch?: string;
-	readonly model?: string;
-	isIdle(): boolean;
-	sendPrompt(text: string, options?: { deliverAs?: DeliverMode; images?: readonly PromptImage[] }): void;
+	listCommands(): CommandInfo[];
+	sendPrompt(
+		text: string,
+		options?: { deliverAs?: DeliverMode; images?: readonly PromptImage[]; expandPromptTemplates?: boolean },
+	): void;
 	abort(): void;
 	notify(text: string, level?: "info" | "warning" | "error"): void;
 	onStateChanged?(status: ConnectionStatus, trustedClients: number): void;
@@ -66,12 +71,19 @@ export class RemoteBridge {
 	private autoApproveEnabled = false;
 	private runningTool?: string;
 	private pendingDelta?: PendingDelta;
+	private readonly prompts: PromptRouter;
 	private lastError?: string;
 
 	constructor(options: { config: RemoteControlConfig; host: RemoteHost; sink: TransportSink }) {
 		this.config = options.config;
 		this.host = options.host;
 		this.sink = options.sink;
+		this.prompts = new PromptRouter({
+			config: this.config,
+			host: this.host,
+			send: (envelope) => this.send(envelope),
+			onCommandSettled: () => this.emitSessionState(this.runningTool),
+		});
 	}
 
 	get autoApprove(): boolean {
@@ -171,7 +183,11 @@ export class RemoteBridge {
 				return;
 			case "prompt.send":
 				if (!this.ensureTrusted(msg.clientId)) return;
-				this.handlePromptSend(msg.text, msg.deliverAs, msg.images);
+				await this.prompts.submit(msg.text, msg.deliverAs, msg.images);
+				return;
+			case "commands.request":
+				if (!this.ensureTrusted(msg.clientId)) return;
+				this.prompts.sendCatalog(msg.clientId);
 				return;
 			case "turn.abort":
 				if (!this.ensureTrusted(msg.clientId)) return;
@@ -414,22 +430,6 @@ export class RemoteBridge {
 			clientId,
 			ts: this.host.now(),
 			payload,
-		});
-	}
-
-	private handlePromptSend(text: string, deliverAs?: DeliverMode, images?: readonly PromptImage[]): void {
-		const validImages: PromptImage[] = [];
-		if (images) {
-			for (const img of images.slice(0, this.config.maxImages)) {
-				const estimatedBytes = Math.ceil((img.data.length * 3) / 4);
-				if (estimatedBytes <= this.config.maxImageBytes) {
-					validImages.push(img);
-				}
-			}
-		}
-		this.host.sendPrompt(text, {
-			...(deliverAs ? { deliverAs } : {}),
-			...(validImages.length > 0 ? { images: validImages } : {}),
 		});
 	}
 

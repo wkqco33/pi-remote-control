@@ -34,6 +34,8 @@ All WebSocket messages are UTF-8 JSON frames using a shared `Envelope`:
 - `approval.request`: `{ requestId, toolCallId, toolName, timeoutMs }`. 대기 중인 요청은 `history.request`를 받을 때 남은 시간과 함께 같은 `requestId`로 다시 보냅니다.
 - `approval.resolved`: `{ requestId, approved, reason: "user"|"auto"|"timeout"|"cancelled" }`
 - `digest.snapshot`: `{ markdown }`
+- `commands.snapshot`: `{ commands: [{ name, description?, source: "builtin"|"prompt"|"skill" }], models: ["provider/id"], thinkingLevels }`. 최상위 `clientId`로 지정된 구독자에게만 전달하며 리플레이 버퍼에 저장하지 않습니다.
+- `command.result`: `{ command, ok, message }`. 기본 명령의 결과나 명령을 거절한 이유입니다.
 - `pair.required`: `{ challengeId, digits, expiresAt, reason }`
 - `pair.status`: `{ paired }`
 - `pair.result`: `{ ok, clientId, error? }`
@@ -45,9 +47,10 @@ All WebSocket messages are UTF-8 JSON frames using a shared `Envelope`:
 - `session.subscribe`: `{ sessionId, lastSeq? }`. 여러 세션에 구독할 수 있습니다. 릴레이는 `lastSeq` 이후 이벤트를 복구할 수 있으면 리플레이하고, 에이전트에 `history.request`의 `pairStatusOnly: true`로 페어링 상태만 요청합니다. 최초 구독이나 전체 리플레이가 불가능할 때는 히스토리 스냅샷을 요청합니다.
 - `session.unsubscribe`: `{ sessionId }`
 - `pair.submit`: `{ sessionId, code }`
-- `prompt.send`: `{ sessionId, text, deliverAs?: "steer"|"followUp", images?: [{ mediaType, data }] }`
+- `prompt.send`: `{ sessionId, text, deliverAs?: "steer"|"followUp", images?: [{ mediaType, data }] }`. `/`로 시작하는 `text`는 확장이 명령으로 해석합니다. 프롬프트 템플릿과 스킬은 확장하고, `/compact`, `/model`, `/thinking`은 확장 API로 실행합니다. 확장 명령과 알 수 없는 명령은 거절합니다. `//`로 시작하면 `/` 하나를 제거한 일반 텍스트이며, 첫 단어에 `/`가 더 있으면 파일 경로로 보고 그대로 전달합니다.
 - `turn.abort`: `{ sessionId }`
 - `approval.response`: `{ sessionId, requestId, approved }`
 - `approval.mode`: `{ sessionId, autoApprove }`. 에이전트의 자동 승인 모드를 변경합니다. 페어링을 요구하는 세션은 페어링한 클라이언트만 변경할 수 있습니다.
 - `digest.request`: `{ sessionId }`
+- `commands.request`: `{ sessionId }`. 페어링을 요구하는 세션은 페어링한 클라이언트에만 목록을 보냅니다.
 - `ping`

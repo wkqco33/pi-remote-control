@@ -97,7 +97,8 @@
       <form id="composer" class="composer">
         <div class="composer-card">
           <label for="prompt-input" class="composer-label">Message</label>
-          <textarea id="prompt-input" rows="2" placeholder="Send a prompt to pi…" aria-describedby="composer-hint" disabled></textarea>
+          <ul id="command-menu" class="command-menu hidden" role="listbox" aria-label="Commands"></ul>
+          <textarea id="prompt-input" rows="2" placeholder="Send a prompt to pi…" aria-describedby="composer-hint" aria-controls="command-menu" disabled></textarea>
           <div id="attachment-preview" class="attachment-preview hidden"></div>
           <div class="composer-row d-flex align-items-center">
             <input id="file-input" class="visually-hidden file-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple disabled />
@@ -110,7 +111,7 @@
             <button id="btn-send" class="btn btn-primary" type="submit" disabled>Send <span aria-hidden="true">↑</span></button>
           </div>
         </div>
-        <div id="composer-hint" class="composer-hint">Enter to send · Shift+Enter for a new line</div>
+        <div id="composer-hint" class="composer-hint">Enter to send · Shift+Enter for a new line · / for commands</div>
       </form>
     </main>
   </div>
@@ -140,6 +141,7 @@
   <script src="/approval.js"></script>
   <script src="/notify.js"></script>
   <script src="/sessions.js"></script>
+  <script src="/commands.js"></script>
   <script src="/browser-auth.js"></script>
   <script src="/app.js"></script>
 </body>

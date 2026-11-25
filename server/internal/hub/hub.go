@@ -238,9 +238,9 @@ func (h *Hub) HandleAgentEvent(sessionID string, env protocol.Envelope) {
 		}
 	}
 
-	// Pairing events are private to a subscribed client and have no replay sequence.
+	// Pairing events and command catalogs are private to a subscribed client and have no replay sequence.
 	switch env.Type {
-	case protocol.TypePairRequired, protocol.TypePairStatus, protocol.TypePairResult:
+	case protocol.TypePairRequired, protocol.TypePairStatus, protocol.TypePairResult, protocol.TypeCommandsSnapshot:
 		target := h.clients[env.ClientID]
 		if target != nil {
 			if _, subscribed := target.subscriptions[sessionID]; subscribed {

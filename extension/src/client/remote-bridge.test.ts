@@ -6,7 +6,8 @@ import { RemoteBridge, type RemoteHost, type TransportSink } from "./remote-brid
 function makeHarness(requirePairing = true) {
 	const sent: WireEnvelope[] = [];
 	const notices: string[] = [];
-	const prompts: Array<{ text: string; deliverAs?: string }> = [];
+	const prompts: Array<{ text: string; deliverAs?: string; expand?: boolean }> = [];
+	const calls: string[] = [];
 	let idx = 0;
 	const randSeq = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.9, 0.8, 0.7, 0.0, 0.9, 0.8];
 
@@ -22,7 +23,20 @@ function makeHarness(requirePairing = true) {
 		host: "box",
 		cwd: "/repo",
 		isIdle: () => true,
-		sendPrompt: (text, opts) => prompts.push({ text, deliverAs: opts?.deliverAs }),
+		sendPrompt: (text, opts) =>
+			prompts.push({ text, deliverAs: opts?.deliverAs, ...(opts?.expandPromptTemplates ? { expand: true } : {}) }),
+		listCommands: () => [
+			{ name: "review", source: "prompt", description: "Review sk-ant-api03-1234567890abcdef" },
+			{ name: "remote", source: "extension" },
+		],
+		listModels: () => ["acme/small"],
+		setModel: async (reference) => {
+			calls.push(`model ${reference}`);
+			return reference === "acme/small" ? "ok" : "not_found";
+		},
+		getThinkingLevel: () => "low",
+		setThinkingLevel: (level) => void calls.push(`thinking ${level}`),
+		compact: async (instructions) => void calls.push(`compact ${instructions ?? ""}`),
 		abort: vi.fn(),
 		notify: (text) => notices.push(text),
 		getHistory: () => [{ role: "user", text: "hi" }],
@@ -35,7 +49,7 @@ function makeHarness(requirePairing = true) {
 		host,
 		sink,
 	});
-	return { bridge, sent, notices, prompts, host };
+	return { bridge, sent, notices, prompts, calls, host };
 }
 
 describe("RemoteBridge", () => {
@@ -85,6 +99,58 @@ describe("RemoteBridge", () => {
 		]);
 		expect(notices).toHaveLength(0);
 		expect(prompts).toEqual([{ text: "hello", deliverAs: undefined }]);
+	});
+
+	it("expands templates but never dispatches extension or unknown commands", async () => {
+		const { bridge, sent, prompts, calls } = makeHarness(false);
+		const type = (text: string) => bridge.handleServerMessage({ type: "prompt.send", clientId: "web-1", text });
+		await type("/review a.ts");
+		await type("//remote auto on");
+		await type("/remote auto on");
+		await type("/nope");
+		expect(prompts).toEqual([
+			{ text: "/review a.ts", deliverAs: undefined, expand: true },
+			{ text: "/remote auto on", deliverAs: undefined },
+		]);
+		expect(sent.filter((e) => e.type === "command.result").map((e) => e.payload)).toMatchObject([
+			{ command: "remote", ok: false },
+			{ command: "nope", ok: false },
+		]);
+		expect(calls).toEqual([]);
+	});
+
+	it("runs built-in commands and reports their results", async () => {
+		const { bridge, sent, prompts, calls } = makeHarness(false);
+		const type = (text: string) => bridge.handleServerMessage({ type: "prompt.send", clientId: "web-1", text });
+		for (const text of ["/model acme/small", "/model missing", "/thinking high", "/thinking huge", "/compact keep plan"]) {
+			await type(text);
+		}
+		expect(calls).toEqual(["model acme/small", "model missing", "thinking high", "compact keep plan"]);
+		const results = sent.filter((e) => e.type === "command.result").map((e) => e.payload as { ok: boolean; message: string });
+		expect(results.map((result) => result.ok)).toEqual([true, false, true, false, true]);
+		expect(results[2]?.message).toContain("does not support high");
+		expect(prompts).toEqual([]);
+		expect(sent.at(-1)?.type).toBe("session.state");
+	});
+
+	it("refuses to compact while the agent is working", async () => {
+		const { bridge, sent, calls, host } = makeHarness(false);
+		host.isIdle = () => false;
+		await bridge.handleServerMessage({ type: "prompt.send", clientId: "web-1", text: "/compact" });
+		expect(calls).toEqual([]);
+		expect(sent.find((e) => e.type === "command.result")?.payload).toMatchObject({ ok: false });
+	});
+
+	it("sends the command catalog only to paired browsers", async () => {
+		const unpaired = makeHarness(true);
+		await unpaired.bridge.handleServerMessage({ type: "commands.request", clientId: "web-1" });
+		expect(unpaired.sent.map((e) => e.type)).toEqual(["pair.required"]);
+
+		const { bridge, sent } = makeHarness(false);
+		await bridge.handleServerMessage({ type: "commands.request", clientId: "web-1" });
+		expect(sent[0]).toMatchObject({ type: "commands.snapshot", clientId: "web-1", payload: { models: ["acme/small"] } });
+		expect(JSON.stringify(sent[0])).toContain("[redacted:anthropic-key]");
+		expect(JSON.stringify(sent[0])).not.toContain('"remote"');
 	});
 
 	it("coalesces stream deltas and keeps them ahead of later frames", () => {

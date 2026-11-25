@@ -73,6 +73,7 @@ export type ServerInboundMessage =
 	| { readonly type: "approval.response"; readonly clientId: string; readonly requestId: string; readonly approved: boolean }
 	| { readonly type: "approval.mode"; readonly clientId: string; readonly autoApprove: boolean }
 	| { readonly type: "digest.request"; readonly clientId: string }
+	| { readonly type: "commands.request"; readonly clientId: string }
 	| { readonly type: "ping" }
 	| { readonly type: "pong" }
 	| { readonly type: "error"; readonly code: string; readonly message: string };
@@ -130,6 +131,8 @@ export function parseServerEnvelope(raw: string): ServerInboundMessage | null {
 		case "approval.mode":
 			if (!clientId || typeof payload.autoApprove !== "boolean") return null;
 			return { type: "approval.mode", clientId, autoApprove: payload.autoApprove };
+		case "commands.request":
+			return clientId ? { type: "commands.request", clientId } : null;
 		case "digest.request":
 			return clientId ? { type: "digest.request", clientId } : null;
 		case "error":

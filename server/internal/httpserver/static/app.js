@@ -21,6 +21,13 @@
   let connection = "connecting";
   let lastSession = sessionStorage.getItem(activeKey);
 
+  const commandMenu = window.PiCommands.createMenu({
+    input: prompt,
+    list: byId("command-menu"),
+    catalog: () => active?.catalog,
+    onNeedCatalog: () => { if (controllable(active)) sendTo(active, "commands.request"); },
+  });
+
   function browserClientId() {
     let id = sessionStorage.getItem(clientIdKey);
     if (!id) {
@@ -136,6 +143,7 @@
       lastSession = active.id;
       sessionStorage.setItem(activeKey, lastSession);
       prompt.value = active.draft;
+      commandMenu.reset();
       mode.value = active.mode;
       pairInput.value = "";
       timeline.replaceChildren(active.thread);
@@ -286,6 +294,10 @@
       case "approval.resolved":
         approvals.resolve(view, payload.requestId);
         break;
+      case "commands.snapshot":
+        view.catalog = payload;
+        if (view === active && document.activeElement === prompt) commandMenu.update();
+        return;
       case "digest.snapshot":
         view.digest = payload.markdown || "";
         view.digestOpen = true;
@@ -349,7 +361,10 @@
   byId("btn-close-digest").onclick = () => { active.digestOpen = false; renderActive(); };
   byId("btn-abort").onclick = () => { if (controllable(active)) sendTo(active, "turn.abort"); };
   byId("session-filter").oninput = renderSessions;
-  prompt.oninput = () => { if (active) active.draft = prompt.value; };
+  prompt.oninput = () => {
+    if (active) active.draft = prompt.value;
+    commandMenu.update();
+  };
   mode.onchange = () => { if (active) active.mode = mode.value; };
 
   fileInput.onchange = async () => {
@@ -399,6 +414,7 @@
       conversation.appendMessage(active, "user", text || "[Image]");
       prompt.value = active.draft = "";
       active.images = [];
+      commandMenu.reset();
       renderAttachments();
       renderActive();
       follower.jump();
@@ -407,6 +423,7 @@
 
   byId("composer").onsubmit = (event) => { event.preventDefault(); submitPrompt(); };
   prompt.onkeydown = (event) => {
+    if (commandMenu.handleKey(event)) return;
     if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
       submitPrompt();
@@ -438,6 +455,7 @@
     active = null;
     prompt.value = "";
     pairInput.value = "";
+    commandMenu.reset();
     timeline.replaceChildren();
     byId("digest-body").replaceChildren();
     byId("session-filter").value = "";
