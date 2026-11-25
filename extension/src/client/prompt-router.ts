@@ -5,6 +5,7 @@ import { buildCommandCatalog, routeSlashInput, THINKING_LEVELS, type BuiltinComm
 import type { DeliverMode, PromptImage, WireEnvelope } from "../core/protocol.js";
 import { redactSecrets } from "../core/redact.js";
 import { runBuiltinCommand, type CommandResult } from "./command-handler.js";
+import { Maintenance } from "./maintenance.js";
 import type { RemoteHost } from "./remote-bridge.js";
 
 export interface PromptRouterOptions {
@@ -18,12 +19,14 @@ export interface PromptRouterOptions {
 export class PromptRouter {
 	private readonly options: PromptRouterOptions;
 	private builtinRunning = false;
+	private readonly maintenance: Maintenance;
 
 	constructor(options: PromptRouterOptions) {
 		this.options = options;
+		this.maintenance = new Maintenance(options.config, options.host);
 	}
 
-	async submit(text: string, deliverAs?: DeliverMode, images?: readonly PromptImage[]): Promise<void> {
+	async submit(clientId: string, text: string, deliverAs?: DeliverMode, images?: readonly PromptImage[]): Promise<void> {
 		const { host } = this.options;
 		const route = routeSlashInput(text, text.startsWith("/") ? host.listCommands() : []);
 		if (route.kind === "reject") {
@@ -31,7 +34,7 @@ export class PromptRouter {
 			return;
 		}
 		if (route.kind === "builtin") {
-			await this.runBuiltin(route.name, route.args, Boolean(images?.length));
+			await this.runBuiltin(clientId, route.name, route.args, Boolean(images?.length));
 			return;
 		}
 		const validImages = this.acceptImages(images);
@@ -44,7 +47,8 @@ export class PromptRouter {
 
 	sendCatalog(clientId: string): void {
 		const { host } = this.options;
-		const commands = buildCommandCatalog(host.listCommands()).map((command) =>
+		const maintenance = this.options.config.remoteUpdate !== "off";
+		const commands = buildCommandCatalog(host.listCommands(), { maintenance }).map((command) =>
 			command.description ? { ...command, description: redactSecrets(command.description) } : command,
 		);
 		this.options.send({
@@ -56,7 +60,7 @@ export class PromptRouter {
 		});
 	}
 
-	private async runBuiltin(name: BuiltinCommandName, args: string, hasImages: boolean): Promise<void> {
+	private async runBuiltin(clientId: string, name: BuiltinCommandName, args: string, hasImages: boolean): Promise<void> {
 		if (hasImages) {
 			this.emitResult(name, { ok: false, message: `/${name} does not accept images.` });
 			return;
@@ -65,9 +69,21 @@ export class PromptRouter {
 			this.emitResult(name, { ok: false, message: "Another command is still running." });
 			return;
 		}
+		if (name === "reload") {
+			const result = this.maintenance.prepareReload(args);
+			this.emitResult(name, result);
+			if (result.ok) this.maintenance.reload();
+			return;
+		}
 		this.builtinRunning = true;
 		try {
-			this.emitResult(name, await runBuiltinCommand(this.options.host, name, args));
+			const result =
+				name === "update"
+					? await this.maintenance.update(clientId, args)
+					: await runBuiltinCommand(this.options.host, name, args);
+			this.emitResult(name, result);
+		} catch (error) {
+			this.emitResult(name, { ok: false, message: `/${name} failed: ${error instanceof Error ? error.message : String(error)}` });
 		} finally {
 			this.builtinRunning = false;
 			this.options.onCommandSettled();

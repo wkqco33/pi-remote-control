@@ -38,5 +38,6 @@ describe("routeSlashInput", () => {
 		expect(buildCommandCatalog(commands).map((command) => command.name)).toEqual([
 			"compact", "model", "thinking", "review", "skill:verify",
 		]);
+		expect(buildCommandCatalog([], { maintenance: true }).map((command) => command.name)).toContain("update");
 	});
 });

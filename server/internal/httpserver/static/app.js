@@ -166,7 +166,8 @@
     const title = summary && sessionList.title(summary);
     label("active-session-title", title || (active ? "Session offline" : "No session selected"));
     label("active-session-sub", summary ?
-      [summary.host, summary.cwd, summary.branch, summary.model, summary.runningTool].filter(Boolean).join(" · ") :
+      [summary.host, summary.cwd, summary.branch, summary.model, summary.runningTool,
+        summary.extensionVersion && `ext ${summary.extensionVersion}`].filter(Boolean).join(" · ") :
       "Running pi sessions appear in the sidebar.");
     prompt.disabled = !enabled;
     fileInput.disabled = !enabled;

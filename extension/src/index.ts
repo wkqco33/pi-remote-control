@@ -3,6 +3,7 @@
  * Thin adapter binding pi ExtensionAPI events to WsClient + RemoteBridge.
  */
 
+import { readFileSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { homedir, hostname } from "node:os";
 import { CONFIG_DIR_NAME, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -26,6 +27,19 @@ import {
 } from "./core/tool-policy.js";
 
 const EXTENSION_KEY = "remote-control";
+const RELOAD_COMMAND = "remote-reload";
+const UPDATE_TIMEOUT_MS = 5 * 60_000;
+
+/** Read at load time, so a reload reports the version that is actually running. */
+function readExtensionVersion(): string | undefined {
+	try {
+		const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version?: string };
+		return manifest.version;
+	} catch {
+		return undefined;
+	}
+}
+const EXTENSION_VERSION = readExtensionVersion();
 
 async function loadServerToken(config: RemoteControlConfig, warnings: string[]): Promise<string> {
 	const envToken = process.env[config.tokenEnv]?.trim();
@@ -124,6 +138,15 @@ export default async function remoteControlExtension(pi: ExtensionAPI): Promise<
 		},
 	});
 
+	// Only a command context can reload. The relay reaches it through /reload,
+	// while other extension commands stay unavailable from the web.
+	pi.registerCommand(RELOAD_COMMAND, {
+		description: "Reload pi (used by the remote /reload command)",
+		handler: async (_args, ctx) => {
+			await ctx.reload();
+		},
+	});
+
 	pi.on("session_start", async (_event, ctx) => {
 		sessionCtx = ctx;
 		const { config, warnings } = await loadExtensionConfig({
@@ -171,6 +194,12 @@ export default async function remoteControlExtension(pi: ExtensionAPI): Promise<
 					});
 				}),
 			isIdle: () => (sessionCtx ? sessionCtx.isIdle() : true),
+			async runPiUpdate(args) {
+				const result = await pi.exec("pi", [...args], { timeout: UPDATE_TIMEOUT_MS });
+				const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
+				return { code: result.killed ? 124 : result.code, output };
+			},
+			reload: () => pi.sendUserMessage(`/${RELOAD_COMMAND}`, { expandPromptTemplates: true }),
 			sendPrompt(text, options) {
 				const content =
 					options?.images && options.images.length > 0
@@ -244,6 +273,7 @@ export default async function remoteControlExtension(pi: ExtensionAPI): Promise<
 				state: host.isIdle() ? "idle" : "busy",
 				requirePairing: config.requirePairing,
 				autoApprove: bridge?.autoApprove ?? false,
+				...(EXTENSION_VERSION ? { extensionVersion: EXTENSION_VERSION } : {}),
 			}),
 			onMessage: (msg) => {
 				void bridge?.handleServerMessage(msg);

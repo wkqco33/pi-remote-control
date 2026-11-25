@@ -179,7 +179,10 @@ func expectHistoryRequest(t *testing.T, agent *fakePeer, target string) protocol
 func TestSessionStatePropagatesAutoApprove(t *testing.T) {
 	h := New(8)
 	off, on := false, true
-	h.RegisterAgent(protocol.AgentHelloPayload{SessionID: "s1", AutoApprove: &off}, func(protocol.Envelope) bool { return true })
+	h.RegisterAgent(protocol.AgentHelloPayload{SessionID: "s1", AutoApprove: &off, ExtensionVersion: "1.2.3"}, func(protocol.Envelope) bool { return true })
+	if got := h.ListSessions()[0].ExtensionVersion; got != "1.2.3" {
+		t.Fatalf("expected extension version from hello, got %q", got)
+	}
 	if got := h.ListSessions()[0].AutoApprove; got == nil || *got {
 		t.Fatalf("expected autoApprove=false from hello, got %v", got)
 	}

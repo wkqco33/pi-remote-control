@@ -56,17 +56,18 @@ type Envelope struct {
 }
 
 type AgentHelloPayload struct {
-	ServerToken     string `json:"serverToken"`
-	SessionID       string `json:"sessionId"`
-	SessionName     string `json:"sessionName,omitempty"`
-	Host            string `json:"host"`
-	Cwd             string `json:"cwd"`
-	Branch          string `json:"branch,omitempty"`
-	Model           string `json:"model,omitempty"`
-	State           string `json:"state"`
-	RequirePairing  bool   `json:"requirePairing"`
-	AutoApprove     *bool  `json:"autoApprove,omitempty"`
-	ProtocolVersion int    `json:"protocolVersion"`
+	ServerToken      string `json:"serverToken"`
+	SessionID        string `json:"sessionId"`
+	SessionName      string `json:"sessionName,omitempty"`
+	Host             string `json:"host"`
+	Cwd              string `json:"cwd"`
+	Branch           string `json:"branch,omitempty"`
+	Model            string `json:"model,omitempty"`
+	State            string `json:"state"`
+	RequirePairing   bool   `json:"requirePairing"`
+	AutoApprove      *bool  `json:"autoApprove,omitempty"`
+	ExtensionVersion string `json:"extensionVersion,omitempty"`
+	ProtocolVersion  int    `json:"protocolVersion"`
 }
 
 type ClientHelloPayload struct {
@@ -75,17 +76,18 @@ type ClientHelloPayload struct {
 }
 
 type SessionSummary struct {
-	SessionID      string `json:"sessionId"`
-	SessionName    string `json:"sessionName,omitempty"`
-	Host           string `json:"host"`
-	Cwd            string `json:"cwd"`
-	Branch         string `json:"branch,omitempty"`
-	Model          string `json:"model,omitempty"`
-	State          string `json:"state"`
-	RunningTool    string `json:"runningTool,omitempty"`
-	RequirePairing bool   `json:"requirePairing"`
-	ConnectedAt    int64  `json:"connectedAt"`
-	LastSeq        uint64 `json:"lastSeq"`
+	SessionID        string `json:"sessionId"`
+	SessionName      string `json:"sessionName,omitempty"`
+	Host             string `json:"host"`
+	Cwd              string `json:"cwd"`
+	Branch           string `json:"branch,omitempty"`
+	Model            string `json:"model,omitempty"`
+	State            string `json:"state"`
+	RunningTool      string `json:"runningTool,omitempty"`
+	RequirePairing   bool   `json:"requirePairing"`
+	ConnectedAt      int64  `json:"connectedAt"`
+	LastSeq          uint64 `json:"lastSeq"`
+	ExtensionVersion string `json:"extensionVersion,omitempty"`
 	// AutoApprove is nil for agents that predate agent-side auto-approve.
 	AutoApprove *bool `json:"autoApprove,omitempty"`
 }

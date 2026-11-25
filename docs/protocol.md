@@ -23,7 +23,7 @@ All WebSocket messages are UTF-8 JSON frames using a shared `Envelope`:
 
 ## Message Types
 ### Agent -> Server
-- `agent.hello`: `{ serverToken, sessionId, sessionName?, host, cwd, branch?, model?, state, requirePairing, protocolVersion: 1, autoApprove? }`
+- `agent.hello`: `{ serverToken, sessionId, sessionName?, host, cwd, branch?, model?, state, requirePairing, protocolVersion: 1, autoApprove?, extensionVersion? }`
 - `session.state`: `{ state, sessionName?, branch?, model?, runningTool?, autoApprove? }`. `autoApprove`는 `sessions.update`의 세션 요약에도 반영됩니다. 필드가 없으면 에이전트 측 자동 승인을 지원하지 않는 확장입니다.
 - `history.snapshot`: `{ items: [{ role, text, ts? }], paired? }`. 도구 호출 항목은 `{ role: "tool", text: <toolName>, toolCallId, status: "running"|"done"|"failed"|"interrupted", durationMs?, ts? }`이며 도구 인자와 결과는 담지 않습니다. 메시지는 최근 40개, 도구 호출은 최근 100개까지 보냅니다. 개인 응답에는 최상위 `clientId`가 포함되며, 기존 이벤트의 마지막 위치를 `seq`로 전달합니다.
 - `stream.start`: `{}`
@@ -47,7 +47,7 @@ All WebSocket messages are UTF-8 JSON frames using a shared `Envelope`:
 - `session.subscribe`: `{ sessionId, lastSeq? }`. 여러 세션에 구독할 수 있습니다. 릴레이는 `lastSeq` 이후 이벤트를 복구할 수 있으면 리플레이하고, 에이전트에 `history.request`의 `pairStatusOnly: true`로 페어링 상태만 요청합니다. 최초 구독이나 전체 리플레이가 불가능할 때는 히스토리 스냅샷을 요청합니다.
 - `session.unsubscribe`: `{ sessionId }`
 - `pair.submit`: `{ sessionId, code }`
-- `prompt.send`: `{ sessionId, text, deliverAs?: "steer"|"followUp", images?: [{ mediaType, data }] }`. `/`로 시작하는 `text`는 확장이 명령으로 해석합니다. 프롬프트 템플릿과 스킬은 확장하고, `/compact`, `/model`, `/thinking`은 확장 API로 실행합니다. 확장 명령과 알 수 없는 명령은 거절합니다. `//`로 시작하면 `/` 하나를 제거한 일반 텍스트이며, 첫 단어에 `/`가 더 있으면 파일 경로로 보고 그대로 전달합니다.
+- `prompt.send`: `{ sessionId, text, deliverAs?: "steer"|"followUp", images?: [{ mediaType, data }] }`. `/`로 시작하는 `text`는 확장이 명령으로 해석합니다. 프롬프트 템플릿과 스킬은 확장하고, `/compact`, `/model`, `/thinking`은 확장 API로 실행합니다. `/update`와 `/reload`는 `remoteUpdate`를 켠 경우에만 실행합니다. 확장 명령과 알 수 없는 명령은 거절합니다. `//`로 시작하면 `/` 하나를 제거한 일반 텍스트이며, 첫 단어에 `/`가 더 있으면 파일 경로로 보고 그대로 전달합니다.
 - `turn.abort`: `{ sessionId }`
 - `approval.response`: `{ sessionId, requestId, approved }`
 - `approval.mode`: `{ sessionId, autoApprove }`. 에이전트의 자동 승인 모드를 변경합니다. 페어링을 요구하는 세션은 페어링한 클라이언트만 변경할 수 있습니다.
