@@ -11,6 +11,7 @@
       this.restoring = false;
       this.attempt = 0;
       this.reconnectTimer = null;
+      this.earlySessions = null;
       this.subscriptions = new Map();
     }
 
@@ -20,61 +21,78 @@
       this.onStatus("connecting");
       const ws = new WebSocket(`${proto}//${location.host}/ws/client`);
       this.ws = ws;
-      let earlySessions = null;
+      this.earlySessions = null;
 
+      // A replaced socket may still fire events; they are ignored.
       ws.addEventListener("open", () => {
-        if (this.ws === ws) {
-          ws.send(JSON.stringify({
-            type: "client.hello",
-            payload: { clientId: this.clientId },
-          }));
-        }
+        if (this.ws === ws) this.sayHello(ws);
       });
-
       ws.addEventListener("message", (ev) => {
-        if (this.ws !== ws) return;
-        let env;
-        try { env = JSON.parse(ev.data); } catch (_) { return; }
-        if (env.type === "error" && env.payload?.code === "unauthorized" && !this.ready) {
-          this.close();
-          this.onStatus("unauthorized");
-          return;
-        }
-        if (!this.ready && env.type === "sessions.update") {
-          earlySessions = env.payload.sessions;
-          return;
-        }
-        if (env.type === "client.welcome") {
-          if (earlySessions) env.payload.sessions = earlySessions;
-          this.relayClientId = env.payload.clientId;
-          this.attempt = 0;
-          this.ready = true;
-          this.restoring = true;
-          this.onStatus("connected");
-        }
-        if (this.subscriptions.has(env.sessionId) && env.type === "history.snapshot" && env.clientId === this.relayClientId) {
-          this.subscriptions.set(env.sessionId, env.seq || 0);
-        } else if (this.subscriptions.has(env.sessionId) && env.seq > 0) {
-          const lastSeq = this.subscriptions.get(env.sessionId);
-          if (env.seq <= lastSeq) return;
-          this.subscriptions.set(env.sessionId, env.seq);
-        }
-        this.onEnvelope(env);
-        if (env.type === "client.welcome") {
-          this.restoring = false;
-          for (const sessionId of this.subscriptions.keys()) this.requestHistory(sessionId);
-        }
+        if (this.ws === ws) this.receive(ev.data);
       });
-
       ws.addEventListener("close", () => {
-        if (this.ws !== ws) return;
-        this.ws = null;
-        this.ready = false;
-        this.onStatus("disconnected");
-        const delay = Math.min(15000, 1000 * 2 ** this.attempt);
-        this.attempt += 1;
-        this.reconnectTimer = setTimeout(() => this.connect(), delay);
+        if (this.ws === ws) this.scheduleReconnect();
       });
+    }
+
+    sayHello(ws) {
+      ws.send(JSON.stringify({ type: "client.hello", payload: { clientId: this.clientId } }));
+    }
+
+    receive(data) {
+      let env;
+      try { env = JSON.parse(data); } catch (_) { return; }
+      if (env.type === "error" && env.payload?.code === "unauthorized" && !this.ready) {
+        this.close();
+        this.onStatus("unauthorized");
+        return;
+      }
+      if (!this.ready && env.type === "sessions.update") {
+        this.earlySessions = env.payload.sessions;
+        return;
+      }
+      if (env.type === "client.welcome") this.welcome(env);
+      if (!this.advanceSequence(env)) return;
+      this.onEnvelope(env);
+      if (env.type === "client.welcome") this.restoreSubscriptions();
+    }
+
+    // History requests wait until the welcome has been handled, so that sessions
+    // subscribed while handling it are requested only once.
+    welcome(env) {
+      if (this.earlySessions) env.payload.sessions = this.earlySessions;
+      this.relayClientId = env.payload.clientId;
+      this.attempt = 0;
+      this.ready = true;
+      this.restoring = true;
+      this.onStatus("connected");
+    }
+
+    restoreSubscriptions() {
+      this.restoring = false;
+      for (const sessionId of this.subscriptions.keys()) this.requestHistory(sessionId);
+    }
+
+    // Returns false for an event that was already delivered. A snapshot sent only
+    // to this client restarts the sequence.
+    advanceSequence(env) {
+      if (!this.subscriptions.has(env.sessionId)) return true;
+      if (env.type === "history.snapshot" && env.clientId === this.relayClientId) {
+        this.subscriptions.set(env.sessionId, env.seq || 0);
+      } else if (env.seq > 0) {
+        if (env.seq <= this.subscriptions.get(env.sessionId)) return false;
+        this.subscriptions.set(env.sessionId, env.seq);
+      }
+      return true;
+    }
+
+    scheduleReconnect() {
+      this.ws = null;
+      this.ready = false;
+      this.onStatus("disconnected");
+      const delay = Math.min(15000, 1000 * 2 ** this.attempt);
+      this.attempt += 1;
+      this.reconnectTimer = setTimeout(() => this.connect(), delay);
     }
 
     // Skip the backoff when the tab or network comes back.
