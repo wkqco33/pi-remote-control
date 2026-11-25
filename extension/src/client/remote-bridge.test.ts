@@ -87,6 +87,27 @@ describe("RemoteBridge", () => {
 		expect(prompts).toEqual([{ text: "hello", deliverAs: undefined }]);
 	});
 
+	it("coalesces stream deltas and keeps them ahead of later frames", () => {
+		vi.useFakeTimers();
+		try {
+			const { bridge, sent } = makeHarness(false);
+			bridge.emitStreamDelta("thinking", "hm");
+			bridge.emitStreamDelta("text", "sk-ant-api03-12345678");
+			bridge.emitStreamDelta("text", "90abcdef done");
+			expect(sent.map((e) => e.payload)).toEqual([{ kind: "thinking", delta: "hm" }]);
+			bridge.emitToolStart("tc-1", "bash");
+			expect(sent.map((e) => e.type)).toEqual(["stream.delta", "stream.delta", "tool.start"]);
+			expect(JSON.stringify(sent[1])).toContain("[redacted:anthropic-key]");
+
+			bridge.emitStreamDelta("text", "tail");
+			vi.advanceTimersByTime(50);
+			expect(sent.at(-1)).toMatchObject({ type: "stream.delta", payload: { delta: "tail" } });
+			expect(sent).toHaveLength(4);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it("handles web tool approval and resolves false on disconnect", async () => {
 		const { bridge, sent } = makeHarness(false);
 		const promise = bridge.requestWebApproval("tc-1", "bash");
@@ -100,10 +121,47 @@ describe("RemoteBridge", () => {
 			requestId,
 			approved: true,
 		});
-		await expect(promise).resolves.toBe(true);
+		await expect(promise).resolves.toEqual({ approved: true, reason: "user" });
 
 		const promise2 = bridge.requestWebApproval("tc-2", "bash");
 		bridge.onConnectionStatus("disconnected");
-		await expect(promise2).resolves.toBe(false);
+		await expect(promise2).resolves.toEqual({ approved: false, reason: "cancelled" });
+	});
+
+	it("approves without a browser while auto-approve is on", async () => {
+		const { bridge, sent } = makeHarness(false);
+		const pending = bridge.requestWebApproval("tc-1", "bash");
+		await bridge.handleServerMessage({ type: "approval.mode", clientId: "web-1", autoApprove: true });
+		await expect(pending).resolves.toEqual({ approved: true, reason: "auto" });
+		expect(sent.at(-1)).toMatchObject({ type: "session.state", payload: { autoApprove: true } });
+
+		bridge.onConnectionStatus("disconnected");
+		const before = sent.length;
+		await expect(bridge.requestWebApproval("tc-2", "bash")).resolves.toEqual({ approved: true, reason: "auto" });
+		expect(sent.slice(before).map((e) => e.type)).toEqual(["approval.resolved"]);
+
+		bridge.disconnectAll();
+		expect(bridge.autoApprove).toBe(false);
+	});
+
+	it("ignores auto-approve requests from unpaired browsers", async () => {
+		const { bridge } = makeHarness(true);
+		await bridge.handleServerMessage({ type: "approval.mode", clientId: "web-1", autoApprove: true });
+		expect(bridge.autoApprove).toBe(false);
+	});
+
+	it("reports a timeout and repeats pending approvals to a returning browser", async () => {
+		vi.useFakeTimers();
+		try {
+			const { bridge, sent } = makeHarness(false);
+			const pending = bridge.requestWebApproval("tc-1", "bash");
+			await bridge.handleServerMessage({ type: "history.request", clientId: "web-2" });
+			expect(sent.filter((e) => e.type === "approval.request")).toHaveLength(2);
+			vi.advanceTimersByTime(5000);
+			await expect(pending).resolves.toEqual({ approved: false, reason: "timeout" });
+			expect(sent.at(-1)).toMatchObject({ type: "approval.resolved", payload: { reason: "timeout" } });
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });

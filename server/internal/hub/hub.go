@@ -81,6 +81,7 @@ func (h *Hub) RegisterAgent(hello protocol.AgentHelloPayload, send SendFunc) uin
 			Model:          hello.Model,
 			State:          state,
 			RequirePairing: hello.RequirePairing,
+			AutoApprove:    hello.AutoApprove,
 			ConnectedAt:    time.Now().UnixMilli(),
 			LastSeq:        ring.LastSeq(),
 		},
@@ -229,6 +230,9 @@ func (h *Hub) HandleAgentEvent(sessionID string, env protocol.Envelope) {
 				agent.summary.Model = st.Model
 			}
 			agent.summary.RunningTool = st.RunningTool
+			if st.AutoApprove != nil {
+				agent.summary.AutoApprove = st.AutoApprove
+			}
 			updateSessions = h.listSessionsLocked()
 			allClients = h.snapshotClientsLocked()
 		}

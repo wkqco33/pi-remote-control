@@ -23,15 +23,16 @@ All WebSocket messages are UTF-8 JSON frames using a shared `Envelope`:
 
 ## Message Types
 ### Agent -> Server
-- `agent.hello`: `{ serverToken, sessionId, sessionName?, host, cwd, branch?, model?, state, requirePairing, protocolVersion: 1 }`
-- `session.state`: `{ state, sessionName?, branch?, model?, runningTool? }`
-- `history.snapshot`: `{ items: [{ role, text, ts? }], paired? }`. 개인 응답에는 최상위 `clientId`가 포함되며, 기존 이벤트의 마지막 위치를 `seq`로 전달합니다.
+- `agent.hello`: `{ serverToken, sessionId, sessionName?, host, cwd, branch?, model?, state, requirePairing, protocolVersion: 1, autoApprove? }`
+- `session.state`: `{ state, sessionName?, branch?, model?, runningTool?, autoApprove? }`. `autoApprove`는 `sessions.update`의 세션 요약에도 반영됩니다. 필드가 없으면 에이전트 측 자동 승인을 지원하지 않는 확장입니다.
+- `history.snapshot`: `{ items: [{ role, text, ts? }], paired? }`. 도구 호출 항목은 `{ role: "tool", text: <toolName>, toolCallId, status: "running"|"done"|"failed"|"interrupted", durationMs?, ts? }`이며 도구 인자와 결과는 담지 않습니다. 메시지는 최근 40개, 도구 호출은 최근 100개까지 보냅니다. 개인 응답에는 최상위 `clientId`가 포함되며, 기존 이벤트의 마지막 위치를 `seq`로 전달합니다.
 - `stream.start`: `{}`
-- `stream.delta`: `{ kind: "text"|"thinking", delta }`
+- `stream.delta`: `{ kind: "text"|"thinking", delta }`. 확장은 약 50ms 동안 받은 조각을 묶어 보내며, 다른 프레임을 보내기 전에는 남은 조각을 먼저 보냅니다.
 - `stream.end`: `{ text }`
 - `tool.start`: `{ toolCallId, toolName }`
 - `tool.end`: `{ toolCallId, toolName, isError, durationMs }`
-- `approval.request`: `{ requestId, toolCallId, toolName, timeoutMs }`
+- `approval.request`: `{ requestId, toolCallId, toolName, timeoutMs }`. 대기 중인 요청은 `history.request`를 받을 때 남은 시간과 함께 같은 `requestId`로 다시 보냅니다.
+- `approval.resolved`: `{ requestId, approved, reason: "user"|"auto"|"timeout"|"cancelled" }`
 - `digest.snapshot`: `{ markdown }`
 - `pair.required`: `{ challengeId, digits, expiresAt, reason }`
 - `pair.status`: `{ paired }`
@@ -47,5 +48,6 @@ All WebSocket messages are UTF-8 JSON frames using a shared `Envelope`:
 - `prompt.send`: `{ sessionId, text, deliverAs?: "steer"|"followUp", images?: [{ mediaType, data }] }`
 - `turn.abort`: `{ sessionId }`
 - `approval.response`: `{ sessionId, requestId, approved }`
+- `approval.mode`: `{ sessionId, autoApprove }`. 에이전트의 자동 승인 모드를 변경합니다. 페어링을 요구하는 세션은 페어링한 클라이언트만 변경할 수 있습니다.
 - `digest.request`: `{ sessionId }`
 - `ping`

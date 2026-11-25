@@ -222,7 +222,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 .digest-header { margin-bottom: var(--s2); }
 .digest-header h2 { font-size: 1rem; font-weight: 650; }
 
-.conversation { flex: 1 1 auto; display: flex; min-width: 0; min-height: 0; }
+.conversation { position: relative; flex: 1 1 auto; display: flex; min-width: 0; min-height: 0; }
 .empty-state {
   display: flex;
   flex: 1;
@@ -294,6 +294,21 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 }
 .thinking-box { margin-bottom: var(--s3); white-space: pre-wrap; }
 .tool-card { display: flex; justify-content: space-between; gap: var(--s3); font-family: var(--font-mono); }
+.tool-group { color: var(--muted); font-size: 0.8125rem; }
+.tool-group > summary {
+  padding: var(--s2) var(--s3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--raised);
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.tool-group > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.tool-group.has-error > summary { border-color: var(--negative); color: var(--negative); }
+.tool-group[open] { max-height: 40vh; flex: none; overflow: auto; }
+.tool-group > .tool-card { margin-top: var(--s1); }
+.jump-latest { position: absolute; right: var(--page-gutter); bottom: var(--s2); z-index: 1; box-shadow: var(--shadow); }
 .markdown-body { line-height: 1.65; overflow-wrap: anywhere; }
 .markdown-body > * { margin: 0 0 var(--s2); }
 .markdown-body > :last-child { margin-bottom: 0; }

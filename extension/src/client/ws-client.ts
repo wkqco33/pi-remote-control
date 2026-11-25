@@ -28,6 +28,7 @@ export interface AgentHelloInfo {
 	readonly model?: string;
 	readonly state: AgentState;
 	readonly requirePairing: boolean;
+	readonly autoApprove?: boolean;
 }
 
 export interface WsClientOptions {

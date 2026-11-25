@@ -13,11 +13,19 @@ export interface PromptImage {
 	readonly data: string;
 }
 
-export interface HistoryItem {
-	readonly role: "user" | "assistant" | "system";
-	readonly text: string;
-	readonly ts?: number;
-}
+export type HistoryToolStatus = "running" | "done" | "failed" | "interrupted";
+
+export type HistoryItem =
+	| { readonly role: "user" | "assistant" | "system"; readonly text: string; readonly ts?: number }
+	| {
+			readonly role: "tool";
+			/** Tool name. */
+			readonly text: string;
+			readonly toolCallId: string;
+			readonly status: HistoryToolStatus;
+			readonly durationMs?: number;
+			readonly ts?: number;
+	  };
 
 export interface WireEnvelope<T = unknown> {
 	readonly type: string;
@@ -63,6 +71,7 @@ export type ServerInboundMessage =
 	  }
 	| { readonly type: "turn.abort"; readonly clientId: string }
 	| { readonly type: "approval.response"; readonly clientId: string; readonly requestId: string; readonly approved: boolean }
+	| { readonly type: "approval.mode"; readonly clientId: string; readonly autoApprove: boolean }
 	| { readonly type: "digest.request"; readonly clientId: string }
 	| { readonly type: "ping" }
 	| { readonly type: "pong" }
@@ -118,6 +127,9 @@ export function parseServerEnvelope(raw: string): ServerInboundMessage | null {
 		case "approval.response":
 			if (!clientId || typeof payload.requestId !== "string" || typeof payload.approved !== "boolean") return null;
 			return { type: "approval.response", clientId, requestId: payload.requestId, approved: payload.approved };
+		case "approval.mode":
+			if (!clientId || typeof payload.autoApprove !== "boolean") return null;
+			return { type: "approval.mode", clientId, autoApprove: payload.autoApprove };
 		case "digest.request":
 			return clientId ? { type: "digest.request", clientId } : null;
 		case "error":

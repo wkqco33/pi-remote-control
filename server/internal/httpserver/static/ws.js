@@ -77,6 +77,13 @@
       });
     }
 
+    // Skip the backoff when the tab or network comes back.
+    resume() {
+      if (this.ws || !this.reconnectTimer) return;
+      this.attempt = 0;
+      this.connect();
+    }
+
     subscribe(sessionId) {
       if (this.subscriptions.has(sessionId)) return;
       this.subscriptions.set(sessionId, 0);

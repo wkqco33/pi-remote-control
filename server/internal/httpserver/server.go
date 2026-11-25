@@ -16,7 +16,11 @@ import (
 	"github.com/wkqco33/pi-remote-control/server/internal/protocol"
 )
 
-const outboundQueueSize = 128
+const (
+	agentQueueSize = 128
+	// Clients receive replay bursts of up to one ring buffer per subscribed session.
+	clientQueueSize = 4096
+)
 
 // Server serves the embedded Web UI, REST endpoints, and WebSocket relays.
 type Server struct {
@@ -141,7 +145,7 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = conn.SetReadDeadline(time.Time{})
 
-	peer := newWSPeer(conn, s.cfg.PingInterval)
+	peer := newWSPeer(conn, s.cfg.PingInterval, agentQueueSize)
 	gen := s.hub.RegisterAgent(hello, peer.enqueue)
 	s.logger.Info("agent connected", "sessionId", hello.SessionID, "host", hello.Host)
 	defer func() {
@@ -211,7 +215,9 @@ func (s *Server) handleClientWS(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = conn.SetReadDeadline(time.Time{})
 
-	peer := newWSPeer(conn, s.cfg.PingInterval)
+	peer := newWSPeer(conn, s.cfg.PingInterval, clientQueueSize)
+	// A silently dropped event cannot be recovered; reconnecting replays it.
+	peer.closeOnOverflow = true
 	gen, welcome := s.hub.RegisterClient(hello.ClientID, peer.enqueue)
 	s.logger.Info("client connected", "clientId", hello.ClientID)
 	defer func() {
@@ -277,6 +283,8 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 }
 
 type wsPeer struct {
+	closeOnOverflow bool
+
 	conn         *websocket.Conn
 	pingInterval time.Duration
 	out          chan protocol.Envelope
@@ -284,11 +292,11 @@ type wsPeer struct {
 	done         chan struct{}
 }
 
-func newWSPeer(conn *websocket.Conn, pingInterval time.Duration) *wsPeer {
+func newWSPeer(conn *websocket.Conn, pingInterval time.Duration, queueSize int) *wsPeer {
 	return &wsPeer{
 		conn:         conn,
 		pingInterval: pingInterval,
-		out:          make(chan protocol.Envelope, outboundQueueSize),
+		out:          make(chan protocol.Envelope, queueSize),
 		done:         make(chan struct{}),
 	}
 }
@@ -303,7 +311,12 @@ func (p *wsPeer) enqueue(env protocol.Envelope) bool {
 	case p.out <- env:
 		return true
 	default:
-		// Slow consumer: drop rather than blocking the hub lock or other peers.
+		// Slow consumer: never block the hub lock or other peers.
+		if p.closeOnOverflow {
+			p.close()
+			// Closing may flush to the network, so keep it off the caller's lock.
+			go func() { _ = p.conn.Close() }()
+		}
 		return false
 	}
 }

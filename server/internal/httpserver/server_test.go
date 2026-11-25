@@ -2,8 +2,10 @@ package httpserver
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -167,5 +169,40 @@ func TestServerHealthAuthAndRelayRoundTrip(t *testing.T) {
 	var clientDelta protocol.Envelope
 	if err := clientConn.ReadJSON(&clientDelta); err != nil || clientDelta.Type != protocol.TypeStreamDelta || clientDelta.Seq != 1 {
 		t.Fatalf("expected stream.delta seq 1 on client, got %#v err=%v", clientDelta, err)
+	}
+}
+
+func TestPeerOverflowClosesOnlyWhenRequested(t *testing.T) {
+	serverConns := make(chan *websocket.Conn, 2)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
+		if err == nil {
+			serverConns <- conn
+		}
+	}))
+	defer ts.Close()
+
+	for _, closeOnOverflow := range []bool{false, true} {
+		remote, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(ts.URL, "http"), nil)
+		if err != nil {
+			t.Fatalf("dial failed: %v", err)
+		}
+		defer remote.Close()
+		conn := <-serverConns
+		defer conn.Close()
+
+		peer := newWSPeer(conn, time.Minute, 1)
+		peer.closeOnOverflow = closeOnOverflow
+		if !peer.enqueue(protocol.Envelope{Type: "a"}) || peer.enqueue(protocol.Envelope{Type: "b"}) {
+			t.Fatal("expected only the first enqueue to succeed")
+		}
+
+		_ = remote.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+		_, _, readErr := remote.ReadMessage()
+		var netErr net.Error
+		timedOut := errors.As(readErr, &netErr) && netErr.Timeout()
+		if timedOut == closeOnOverflow {
+			t.Fatalf("closeOnOverflow=%v: unexpected read result: %v", closeOnOverflow, readErr)
+		}
 	}
 }

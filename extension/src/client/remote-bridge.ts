@@ -7,6 +7,7 @@ import type { RemoteControlConfig } from "../config.js";
 import { createChallenge, formatChallengeCode, verifyChallenge, type PendingChallenge } from "../core/pairing.js";
 import type { DeliverMode, HistoryItem, PromptImage, ServerInboundMessage, WireEnvelope } from "../core/protocol.js";
 import { redactSecrets } from "../core/redact.js";
+import type { ApprovalReason } from "../core/tool-policy.js";
 import type { ConnectionStatus, StatusSnapshot } from "../core/status.js";
 
 export interface RemoteHost {
@@ -32,8 +33,25 @@ export interface TransportSink {
 	send(envelope: WireEnvelope): boolean;
 }
 
+export interface ApprovalOutcome {
+	readonly approved: boolean;
+	readonly reason: ApprovalReason;
+}
+
 interface PendingApproval {
-	readonly resolve: (approved: boolean) => void;
+	readonly toolCallId: string;
+	readonly toolName: string;
+	readonly expiresAt: number;
+	readonly resolve: (outcome: ApprovalOutcome) => void;
+	readonly timer: ReturnType<typeof setTimeout>;
+}
+
+/** Tokens arriving within this window share one frame, which keeps replays short. */
+export const DELTA_FLUSH_MS = 50;
+
+interface PendingDelta {
+	readonly kind: "text" | "thinking";
+	text: string;
 	readonly timer: ReturnType<typeof setTimeout>;
 }
 
@@ -45,12 +63,32 @@ export class RemoteBridge {
 	private readonly pendingChallenges = new Map<string, PendingChallenge>();
 	private readonly pendingApprovals = new Map<string, PendingApproval>();
 	private approvalCounter = 0;
+	private autoApproveEnabled = false;
+	private runningTool?: string;
+	private pendingDelta?: PendingDelta;
 	private lastError?: string;
 
 	constructor(options: { config: RemoteControlConfig; host: RemoteHost; sink: TransportSink }) {
 		this.config = options.config;
 		this.host = options.host;
 		this.sink = options.sink;
+	}
+
+	get autoApprove(): boolean {
+		return this.autoApproveEnabled;
+	}
+
+	/** Agent-side mode: stays effective while no browser is connected. */
+	setAutoApprove(enabled: boolean, source: string): void {
+		if (this.autoApproveEnabled === enabled) return;
+		this.autoApproveEnabled = enabled;
+		this.host.notify(`[remote] Auto-approve ${enabled ? "on" : "off"} (by ${source}).`, enabled ? "warning" : "info");
+		if (enabled) {
+			for (const requestId of [...this.pendingApprovals.keys()]) {
+				this.settleApproval(requestId, { approved: true, reason: "auto" });
+			}
+		}
+		this.emitSessionState(this.runningTool);
 	}
 
 	onConnectionStatus(status: ConnectionStatus, detail?: string): void {
@@ -66,6 +104,7 @@ export class RemoteBridge {
 	}
 
 	stop(): void {
+		this.flushDeltas();
 		this.rejectAllApprovals();
 	}
 
@@ -74,6 +113,7 @@ export class RemoteBridge {
 		this.trustedClients.clear();
 		this.pendingChallenges.clear();
 		this.rejectAllApprovals();
+		this.setAutoApprove(false, "local disconnect");
 		this.host.onStateChanged?.(this.sink.currentStatus, 0);
 		if (this.sink.currentStatus === "connected") {
 			for (const clientId of revokedClients) {
@@ -92,6 +132,7 @@ export class RemoteBridge {
 			pendingPairings: this.pendingChallenges.size,
 			remoteToolPolicy: this.config.remoteToolPolicy,
 			remoteToolApproval: this.config.remoteToolApproval,
+			autoApprove: this.autoApproveEnabled,
 			...(this.lastError ? { lastError: this.lastError } : {}),
 		};
 	}
@@ -102,7 +143,7 @@ export class RemoteBridge {
 				const { clientId } = msg;
 				const paired = !this.config.requirePairing || (clientId !== undefined && this.trustedClients.has(clientId));
 				if (msg.pairStatusOnly && clientId) {
-					this.sink.send({
+					this.send({
 						type: "pair.status",
 						sessionId: this.host.sessionId,
 						clientId,
@@ -110,7 +151,7 @@ export class RemoteBridge {
 						payload: { paired },
 					});
 				} else {
-					this.sink.send({
+					this.send({
 						type: "history.snapshot",
 						sessionId: this.host.sessionId,
 						...(clientId ? { clientId } : {}),
@@ -120,6 +161,8 @@ export class RemoteBridge {
 				}
 				if (clientId && !paired) {
 					this.issuePairingChallenge(clientId, "pairing_required");
+				} else {
+					this.resendPendingApprovals();
 				}
 				return;
 			}
@@ -140,7 +183,11 @@ export class RemoteBridge {
 				return;
 			case "approval.response":
 				if (!this.ensureTrusted(msg.clientId)) return;
-				this.resolveApproval(msg.requestId, msg.approved);
+				this.settleApproval(msg.requestId, { approved: msg.approved, reason: "user" });
+				return;
+			case "approval.mode":
+				if (!this.ensureTrusted(msg.clientId)) return;
+				this.setAutoApprove(msg.autoApprove, msg.clientId);
 				return;
 			default:
 				return;
@@ -148,12 +195,14 @@ export class RemoteBridge {
 	}
 
 	emitSessionState(runningTool?: string): void {
-		this.sink.send({
+		this.runningTool = runningTool;
+		this.send({
 			type: "session.state",
 			sessionId: this.host.sessionId,
 			ts: this.host.now(),
 			payload: {
 				state: this.host.isIdle() ? "idle" : "busy",
+				autoApprove: this.autoApproveEnabled,
 				...(this.host.sessionName ? { sessionName: this.host.sessionName } : {}),
 				...(this.host.branch ? { branch: this.host.branch } : {}),
 				...(this.host.model ? { model: this.host.model } : {}),
@@ -163,7 +212,7 @@ export class RemoteBridge {
 	}
 
 	emitStreamStart(): void {
-		this.sink.send({
+		this.send({
 			type: "stream.start",
 			sessionId: this.host.sessionId,
 			ts: this.host.now(),
@@ -173,16 +222,38 @@ export class RemoteBridge {
 
 	emitStreamDelta(kind: "text" | "thinking", delta: string): void {
 		if (!delta) return;
+		if (this.pendingDelta && this.pendingDelta.kind !== kind) this.flushDeltas();
+		if (this.pendingDelta) {
+			this.pendingDelta.text += delta;
+			return;
+		}
+		const timer = setTimeout(() => this.flushDeltas(), DELTA_FLUSH_MS);
+		if (typeof timer === "object" && "unref" in timer) timer.unref();
+		this.pendingDelta = { kind, text: delta, timer };
+	}
+
+	private flushDeltas(): void {
+		const pending = this.pendingDelta;
+		if (!pending) return;
+		this.pendingDelta = undefined;
+		clearTimeout(pending.timer);
 		this.sink.send({
 			type: "stream.delta",
 			sessionId: this.host.sessionId,
 			ts: this.host.now(),
-			payload: { kind, delta: redactSecrets(delta) },
+			// Redacting the joined text also catches secrets split across tokens.
+			payload: { kind: pending.kind, delta: redactSecrets(pending.text) },
 		});
 	}
 
+	/** Every other frame goes out after the buffered text so the order is preserved. */
+	private send(envelope: WireEnvelope): boolean {
+		this.flushDeltas();
+		return this.sink.send(envelope);
+	}
+
 	emitStreamEnd(text: string): void {
-		this.sink.send({
+		this.send({
 			type: "stream.end",
 			sessionId: this.host.sessionId,
 			ts: this.host.now(),
@@ -191,7 +262,7 @@ export class RemoteBridge {
 	}
 
 	emitToolStart(toolCallId: string, toolName: string): void {
-		this.sink.send({
+		this.send({
 			type: "tool.start",
 			sessionId: this.host.sessionId,
 			ts: this.host.now(),
@@ -200,7 +271,7 @@ export class RemoteBridge {
 	}
 
 	emitToolEnd(toolCallId: string, toolName: string, isError: boolean, durationMs: number): void {
-		this.sink.send({
+		this.send({
 			type: "tool.end",
 			sessionId: this.host.sessionId,
 			ts: this.host.now(),
@@ -210,7 +281,7 @@ export class RemoteBridge {
 
 	async emitDigest(): Promise<void> {
 		const markdown = await this.host.getDigest();
-		this.sink.send({
+		this.send({
 			type: "digest.snapshot",
 			sessionId: this.host.sessionId,
 			ts: this.host.now(),
@@ -218,29 +289,56 @@ export class RemoteBridge {
 		});
 	}
 
-	requestWebApproval(toolCallId: string, toolName: string): Promise<boolean> {
+	requestWebApproval(toolCallId: string, toolName: string): Promise<ApprovalOutcome> {
 		const requestId = `apr_${this.host.now()}_${++this.approvalCounter}`;
-		const sent = this.sink.send({
+		if (this.autoApproveEnabled) {
+			const outcome: ApprovalOutcome = { approved: true, reason: "auto" };
+			this.emitApprovalResolved(requestId, outcome);
+			return Promise.resolve(outcome);
+		}
+		const timeoutMs = this.config.approvalTimeoutMs;
+		const sent = this.sendApprovalRequest(requestId, toolCallId, toolName, timeoutMs);
+		if (!sent) {
+			return Promise.resolve({ approved: false, reason: "cancelled" });
+		}
+		return new Promise<ApprovalOutcome>((resolve) => {
+			const timer = setTimeout(() => {
+				this.settleApproval(requestId, { approved: false, reason: "timeout" });
+			}, timeoutMs);
+			if (typeof timer === "object" && "unref" in timer) timer.unref();
+			this.pendingApprovals.set(requestId, {
+				toolCallId,
+				toolName,
+				expiresAt: this.host.now() + timeoutMs,
+				resolve,
+				timer,
+			});
+		});
+	}
+
+	private sendApprovalRequest(requestId: string, toolCallId: string, toolName: string, timeoutMs: number): boolean {
+		return this.send({
 			type: "approval.request",
 			sessionId: this.host.sessionId,
 			ts: this.host.now(),
-			payload: {
-				requestId,
-				toolCallId,
-				toolName,
-				timeoutMs: this.config.approvalTimeoutMs,
-			},
+			payload: { requestId, toolCallId, toolName, timeoutMs },
 		});
-		if (!sent) {
-			return Promise.resolve(false);
+	}
+
+	/** A browser that reloaded has no replay cursor, so repeat what is still waiting. */
+	private resendPendingApprovals(): void {
+		for (const [requestId, entry] of this.pendingApprovals) {
+			const remainingMs = entry.expiresAt - this.host.now();
+			if (remainingMs > 0) this.sendApprovalRequest(requestId, entry.toolCallId, entry.toolName, remainingMs);
 		}
-		return new Promise<boolean>((resolve) => {
-			const timer = setTimeout(() => {
-				this.pendingApprovals.delete(requestId);
-				resolve(false);
-			}, this.config.approvalTimeoutMs);
-			if (typeof timer === "object" && "unref" in timer) timer.unref();
-			this.pendingApprovals.set(requestId, { resolve, timer });
+	}
+
+	private emitApprovalResolved(requestId: string, outcome: ApprovalOutcome): void {
+		this.send({
+			type: "approval.resolved",
+			sessionId: this.host.sessionId,
+			ts: this.host.now(),
+			payload: { requestId, ...outcome },
 		});
 	}
 
@@ -268,7 +366,7 @@ export class RemoteBridge {
 				"info",
 			);
 		}
-		this.sink.send({
+		this.send({
 			type: "pair.required",
 			sessionId: this.host.sessionId,
 			clientId,
@@ -310,7 +408,7 @@ export class RemoteBridge {
 	}
 
 	private sendPairResult(clientId: string, payload: { ok: boolean; clientId: string; error?: string }): void {
-		this.sink.send({
+		this.send({
 			type: "pair.result",
 			sessionId: this.host.sessionId,
 			clientId,
@@ -335,19 +433,18 @@ export class RemoteBridge {
 		});
 	}
 
-	private resolveApproval(requestId: string, approved: boolean): void {
+	private settleApproval(requestId: string, outcome: ApprovalOutcome): void {
 		const entry = this.pendingApprovals.get(requestId);
 		if (!entry) return;
 		clearTimeout(entry.timer);
 		this.pendingApprovals.delete(requestId);
-		entry.resolve(approved);
+		this.emitApprovalResolved(requestId, outcome);
+		entry.resolve(outcome);
 	}
 
 	private rejectAllApprovals(): void {
-		for (const [id, entry] of this.pendingApprovals.entries()) {
-			clearTimeout(entry.timer);
-			entry.resolve(false);
-			this.pendingApprovals.delete(id);
+		for (const requestId of [...this.pendingApprovals.keys()]) {
+			this.settleApproval(requestId, { approved: false, reason: "cancelled" });
 		}
 	}
 }

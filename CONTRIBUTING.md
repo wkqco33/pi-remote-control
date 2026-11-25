@@ -22,6 +22,7 @@ task check
 ```bash
 # 1. Go 릴레이 서버
 cd server && go test -race ./... && go vet ./... && go build -o ../bin/pi-remote-server ./cmd/pi-remote-server
+cd .. && node --test server/webtest/*.test.js
 
 # 2. TypeScript 확장
 cd ../extension && npm ci && npm run check && npm run pack:check

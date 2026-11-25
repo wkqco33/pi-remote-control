@@ -50,6 +50,8 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: ${{ matrix.node }}
+      - name: Test Web UI scripts
+        run: node --test server/webtest/*.test.js
       - name: Check extension
         working-directory: extension
         run: |

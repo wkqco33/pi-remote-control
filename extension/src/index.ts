@@ -24,6 +24,7 @@ import {
 	needsApproval,
 	remoteToolBlockReason,
 	remoteToolDeclinedReason,
+	type ApprovalReason,
 } from "./core/tool-policy.js";
 
 const EXTENSION_KEY = "remote-control";
@@ -121,9 +122,9 @@ export default async function remoteControlExtension(pi: ExtensionAPI): Promise<
 	}
 
 	pi.registerCommand("remote", {
-		description: "Control pi-remote-control relay connection (status, disconnect, digest, help)",
+		description: "Control pi-remote-control relay connection (status, disconnect, digest, auto, help)",
 		handler: async (args, ctx) => {
-			const sub = args.trim().split(/\s+/)[0] || "status";
+			const [sub = "status", value] = args.trim().split(/\s+/).filter(Boolean);
 			if (sub === "status" || sub === "doctor") {
 				if (!bridge) {
 					ctx.ui.notify("remote-control: not initialized.", "warning");
@@ -142,7 +143,15 @@ export default async function remoteControlExtension(pi: ExtensionAPI): Promise<
 				ctx.ui.notify("remote-control: digest pushed.", "info");
 				return;
 			}
-			ctx.ui.notify("Usage: /remote [status|doctor|digest|disconnect]", "info");
+			if (sub === "auto" && (value === "on" || value === "off")) {
+				if (!bridge) {
+					ctx.ui.notify("remote-control: not initialized.", "warning");
+					return;
+				}
+				bridge.setAutoApprove(value === "on", "local terminal");
+				return;
+			}
+			ctx.ui.notify("Usage: /remote [status|doctor|digest|disconnect|auto on|auto off]", "info");
 		},
 	});
 
@@ -201,7 +210,7 @@ export default async function remoteControlExtension(pi: ExtensionAPI): Promise<
 			getHistory: () => {
 				try {
 					const entries = ctx.sessionManager.getEntries() as unknown as RawSessionEntry[];
-					return buildHistorySnapshot(entries);
+					return buildHistorySnapshot(entries, { busy: !ctx.isIdle() });
 				} catch {
 					return [];
 				}
@@ -239,6 +248,7 @@ export default async function remoteControlExtension(pi: ExtensionAPI): Promise<
 				...(host.model ? { model: host.model } : {}),
 				state: host.isIdle() ? "idle" : "busy",
 				requirePairing: config.requirePairing,
+				autoApprove: bridge?.autoApprove ?? false,
 			}),
 			onMessage: (msg) => {
 				void bridge?.handleServerMessage(msg);
@@ -331,13 +341,16 @@ export default async function remoteControlExtension(pi: ExtensionAPI): Promise<
 		if (!needsApproval(remoteToolApproval, event.toolName)) return undefined;
 
 		let approved = false;
+		let declineReason: ApprovalReason | undefined;
 		if (remoteToolApproval === "web") {
-			approved = await bridge.requestWebApproval(event.toolCallId, event.toolName);
+			const outcome = await bridge.requestWebApproval(event.toolCallId, event.toolName);
+			approved = outcome.approved;
+			declineReason = outcome.reason;
 		} else if (remoteToolApproval === "local") {
 			approved = await ctx.ui.confirm("Remote tool call", `Allow '${event.toolName}' on remote turn?`);
 		}
 		if (approved) return undefined;
-		return { block: true, reason: remoteToolDeclinedReason(event.toolName) };
+		return { block: true, reason: remoteToolDeclinedReason(event.toolName, declineReason) };
 	});
 
 	pi.on("agent_settled", async (_event, ctx) => {

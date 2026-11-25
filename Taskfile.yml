@@ -7,6 +7,10 @@ tasks:
       - go test -race ./...
       - go vet ./...
 
+  web:test:
+    cmds:
+      - node --test server/webtest/*.test.js
+
   server:build:
     dir: server
     cmds:
@@ -26,5 +30,6 @@ tasks:
     cmds:
       - task: server:test
       - task: server:build
+      - task: web:test
       - task: ext:check
       - task: e2e
