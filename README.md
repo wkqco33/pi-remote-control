@@ -47,7 +47,18 @@ pi install npm:@wkqco33/pi-remote-control
 pi install git:github.com/wkqco33/pi-remote-control
 ```
 
-설정 파일(`~/.pi/agent/remote-control.json` 또는 `<project>/.pi/remote-control.json`)에는 비밀값 대신 환경변수 이름(`tokenEnv`)만 지정합니다.
+설정 파일에는 비밀값 대신 환경변수 이름(`tokenEnv`)만 지정합니다. 설정은 `~/.pi/agent/remote-control.json`에 작성합니다.
+
+프로젝트 설정(`<project>/.pi/remote-control.json`)은 `pi`가 신뢰한 프로젝트에서만 읽으며, **보안을 강화하는 값만** 적용합니다.
+
+| 프로젝트 설정에서 가능한 값 | 조건 |
+| --- | --- |
+| `requirePairing` | `true`로 켜기 |
+| `remoteToolPolicy` | 같거나 더 엄격한 값 (`unrestricted` < `read-only` < `no-tools`) |
+| `remoteToolApproval` | 같거나 더 엄격한 값 (`off` < `web` < `local`) |
+| `approvalTimeoutMs`, `pairingTtlMs` | 같거나 더 짧은 값 |
+
+`serverUrl`, `tokenEnv`, `tokenFile` 등 나머지 값은 프로젝트 설정에서 무시하고 경고합니다. `PI_REMOTE_CONFIG`를 지정하면 그 파일만 읽으며 모든 값을 적용합니다.
 
 ```json
 {
@@ -73,7 +84,7 @@ pi install git:github.com/wkqco33/pi-remote-control
 
 브라우저에서 `http://127.0.0.1:8787`에 접속해 서버 토큰을 입력합니다. 브라우저는 30일 동안 로그인을 기억하며, `Connection → Sign out`에서 로그아웃할 수 있습니다.
 
-기본 설정에서는 릴레이에 토큰으로 인증한 모든 클라이언트가 세션을 제어할 수 있습니다. 터미널 코드도 요구하려면 `~/.pi/agent/remote-control.json` 또는 `<project>/.pi/remote-control.json`에 `"requirePairing": true`를 지정하고 `pi` 세션을 다시 시작한 뒤, 로컬 터미널에 표시된 코드를 웹에 입력하세요. 기존 설정에서 `true`를 지정했다면 페어링이 계속 적용됩니다. 로그인은 브라우저 프로필에서 공유되며, 페어링은 현재 로그인 쿠키와 탭, 실행 중인 `pi` 세션 단위로 유지됩니다. 페어링을 사용하는 배포는 릴레이와 `pi` 확장을 함께 업데이트하세요.
+기본 설정에서는 릴레이에 토큰으로 인증한 모든 클라이언트가 세션을 제어할 수 있습니다. 터미널 코드도 요구하려면 `~/.pi/agent/remote-control.json`(신뢰한 프로젝트는 `<project>/.pi/remote-control.json`도 가능)에 `"requirePairing": true`를 지정하고 `pi` 세션을 다시 시작한 뒤, 로컬 터미널에 표시된 코드를 웹에 입력하세요. 기존 설정에서 `true`를 지정했다면 페어링이 계속 적용됩니다. 로그인은 브라우저 프로필에서 공유되며, 페어링은 현재 로그인 쿠키와 탭, 실행 중인 `pi` 세션 단위로 유지됩니다. 페어링을 사용하는 배포는 릴레이와 `pi` 확장을 함께 업데이트하세요.
 
 `remoteToolApproval: "web"`에서 `Auto-approve`를 켜면 승인 모드가 `pi` 확장에 저장됩니다. 브라우저를 최소화하거나 닫아도 작업이 계속되고, 다시 접속하거나 다른 탭에서 열어도 같은 상태가 보입니다. 모드는 `/remote auto off`, `/remote disconnect`, `pi` 세션 종료로 해제됩니다. 켜져 있는 동안에는 `remoteToolPolicy`가 차단하지 않는 원격 도구가 확인 없이 실행되므로 주의하세요. 이 기능은 릴레이 서버와 `pi` 확장을 함께 업데이트해야 동작하며, 이전 확장에서는 브라우저가 열려 있을 때만 자동 승인합니다.
 

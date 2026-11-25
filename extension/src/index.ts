@@ -5,17 +5,15 @@
 
 import { readFile, stat } from "node:fs/promises";
 import { homedir, hostname } from "node:os";
-import { join } from "node:path";
 import { CONFIG_DIR_NAME, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { RemoteBridge, type RemoteHost } from "./client/remote-bridge.js";
 import { WsClient } from "./client/ws-client.js";
 import {
 	expandHomePath,
-	parseRemoteConfig,
 	parseTokenFileContent,
-	resolveRemoteConfig,
 	type RemoteControlConfig,
 } from "./config.js";
+import { loadExtensionConfig } from "./config-loader.js";
 import { buildWorkDigest, parseGitBranch, parseGitNumstat } from "./core/digest.js";
 import { buildHistorySnapshot, type RawSessionEntry } from "./core/history.js";
 import { formatFooterLabel, formatStatusReport } from "./core/status.js";
@@ -28,35 +26,6 @@ import {
 } from "./core/tool-policy.js";
 
 const EXTENSION_KEY = "remote-control";
-
-async function loadExtensionConfig(cwd: string): Promise<{ config: RemoteControlConfig; warnings: string[] }> {
-	const warnings: string[] = [];
-	let merged: Partial<RemoteControlConfig> = {};
-
-	const override = process.env.PI_REMOTE_CONFIG?.trim();
-	const paths = override
-		? [override]
-		: [
-				join(homedir(), CONFIG_DIR_NAME, "agent", "remote-control.json"),
-				join(cwd, CONFIG_DIR_NAME, "remote-control.json"),
-			];
-
-	for (const path of paths) {
-		try {
-			const raw = await readFile(path, "utf8");
-			const parsed = parseRemoteConfig(JSON.parse(raw) as unknown);
-			warnings.push(...parsed.warnings);
-			merged = { ...merged, ...parsed.config };
-		} catch (error) {
-			const code = (error as NodeJS.ErrnoException).code;
-			if (code !== "ENOENT") {
-				warnings.push(`config error (${path}): ${error instanceof Error ? error.message : String(error)}`);
-			}
-		}
-	}
-
-	return { config: resolveRemoteConfig(merged), warnings };
-}
 
 async function loadServerToken(config: RemoteControlConfig, warnings: string[]): Promise<string> {
 	const envToken = process.env[config.tokenEnv]?.trim();
@@ -157,7 +126,13 @@ export default async function remoteControlExtension(pi: ExtensionAPI): Promise<
 
 	pi.on("session_start", async (_event, ctx) => {
 		sessionCtx = ctx;
-		const { config, warnings } = await loadExtensionConfig(ctx.cwd);
+		const { config, warnings } = await loadExtensionConfig({
+			cwd: ctx.cwd,
+			homeDir: homedir(),
+			configDirName: CONFIG_DIR_NAME,
+			projectTrusted: ctx.isProjectTrusted(),
+			env: process.env,
+		});
 		await refreshBranch(ctx.cwd);
 		const serverToken = await loadServerToken(config, warnings);
 
