@@ -96,6 +96,39 @@ export function resolveRemoteConfig(
 	};
 }
 
+const POLICY_STRICTNESS: Record<RemoteToolPolicy, number> = { unrestricted: 0, "read-only": 1, "no-tools": 2 };
+// "local" needs someone at the terminal, so it is stricter than "web".
+const APPROVAL_STRICTNESS: Record<RemoteToolApproval, number> = { off: 0, web: 1, local: 2 };
+
+type ProjectRule<Key extends keyof RemoteControlConfig> = (
+	value: RemoteControlConfig[Key],
+	current: RemoteControlConfig[Key],
+) => boolean;
+
+/** Keys a project may set, and when its value is at least as strict. All other keys belong to the user. */
+const PROJECT_RULES: { readonly [Key in keyof RemoteControlConfig]?: ProjectRule<Key> } = {
+	requirePairing: (value, current) => value || !current,
+	remoteToolPolicy: (value, current) => POLICY_STRICTNESS[value] >= POLICY_STRICTNESS[current],
+	remoteToolApproval: (value, current) => APPROVAL_STRICTNESS[value] >= APPROVAL_STRICTNESS[current],
+	approvalTimeoutMs: (value, current) => value <= current,
+	pairingTtlMs: (value, current) => value <= current,
+};
+
+/** Layers a repository's config over the user's without letting it weaken or redirect anything. */
+export function applyProjectConfig(
+	base: RemoteControlConfig,
+	project: Partial<RemoteControlConfig>,
+): { config: RemoteControlConfig; ignored: string[] } {
+	const accepted: Record<string, unknown> = {};
+	const ignored: string[] = [];
+	for (const key of Object.keys(project) as (keyof RemoteControlConfig)[]) {
+		const rule = PROJECT_RULES[key] as ((value: unknown, current: unknown) => boolean) | undefined;
+		if (rule?.(project[key], base[key])) accepted[key] = project[key];
+		else ignored.push(key);
+	}
+	return { config: { ...base, ...(accepted as Partial<RemoteControlConfig>) }, ignored };
+}
+
 export function expandHomePath(filePath: string, homeDir: string): string {
 	const trimmed = filePath.trim();
 	if (trimmed === "~") return homeDir;
