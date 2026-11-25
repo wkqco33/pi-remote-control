@@ -367,6 +367,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 .btn-sm { font-size: 0.8125rem; }
 .btn-ghost { background: transparent; }
 .btn:not(:disabled):hover { background: var(--selected); }
+.btn-ghost.is-active { background: var(--selected); border-color: var(--primary); color: var(--accent); }
 .btn-primary { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
 .btn-primary:not(:disabled):hover { background: var(--primary-hover); border-color: var(--primary-hover); }
 .btn-danger { color: var(--negative); background: transparent; }

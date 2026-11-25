@@ -143,7 +143,7 @@
       thread.className = "conversation-thread";
       view = {
         id: summary.sessionId, summary, thread, scroll: null, draft: "",
-        mode: "followUp", images: [], loading: true,
+        mode: "followUp", images: [], loading: true, autoApprove: false,
       };
       views.set(view.id, view);
       client.subscribe(view.id);
@@ -179,6 +179,12 @@
     prompt.disabled = !enabled;
     fileInput.disabled = !enabled;
     mode.disabled = !enabled;
+    const autoBtn = byId("btn-auto-approve");
+    const autoOn = Boolean(active?.autoApprove);
+    autoBtn.disabled = !enabled;
+    autoBtn.setAttribute("aria-pressed", String(autoOn));
+    autoBtn.classList.toggle("is-active", autoOn);
+    autoBtn.textContent = autoOn ? "Auto-approve: On" : "Auto-approve: Off";
     byId("btn-send").disabled = !enabled;
     byId("btn-digest").disabled = !enabled;
     byId("btn-abort").disabled = !enabled || summary.state !== "busy";
@@ -293,7 +299,12 @@
         if (view === active) pairInput.value = "";
         break;
       case "approval.request":
-        view.approval = { ...payload, expiresAt: (env.ts || Date.now()) + (payload.timeoutMs || 60000) };
+        if (controllable(view) && view.autoApprove && payload.requestId) {
+          sendTo(view, "approval.response", { requestId: payload.requestId, approved: true });
+          view.approval = null;
+        } else {
+          view.approval = { ...payload, expiresAt: (env.ts || Date.now()) + (payload.timeoutMs || 60000) };
+        }
         break;
       case "digest.snapshot":
         view.digest = payload.markdown || "";
@@ -331,7 +342,21 @@
   }
 
   byId("btn-approve-tool").onclick = () => respondApproval(true);
+  byId("btn-auto-approve-tool").onclick = () => {
+    if (!controllable(active)) return;
+    active.autoApprove = true;
+    respondApproval(true);
+    renderActive();
+  };
   byId("btn-reject-tool").onclick = () => respondApproval(false);
+  byId("btn-auto-approve").onclick = () => {
+    if (!controllable(active)) return;
+    active.autoApprove = !active.autoApprove;
+    if (active.autoApprove && active.approval && active.approval.expiresAt > Date.now()) {
+      respondApproval(true);
+    }
+    renderActive();
+  };
   byId("pair-form").onsubmit = (event) => {
     event.preventDefault();
     const code = pairInput.value.replace(/[\s-]+/g, "");
