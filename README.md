@@ -79,6 +79,7 @@ pi install git:github.com/wkqco33/pi-remote-control
 | `remoteToolPolicy` | `unrestricted` | 원격 턴 도구 제한 (`unrestricted` \| `read-only` \| `no-tools`) |
 | `remoteToolApproval` | `off` | 원격 턴 비읽기전용 도구 승인 (`off` \| `local` \| `web`) |
 | `approvalTimeoutMs` | `60000` | 웹/로컬 도구 승인 대기 제한 시간 (ms) |
+| `remoteUpdate` | `off` | 웹의 `/update`, `/reload` 허용 (`off` \| `self` \| `all`). 프로젝트 설정에서는 지정 불가 |
 
 ### 3. 웹에서 세션 작업하기
 
@@ -100,6 +101,24 @@ pi install git:github.com/wkqco33/pi-remote-control
 | `/compact [지시]` | 세션 컨텍스트를 압축합니다. 작업 중에는 실행하지 않습니다. |
 | `/model [provider/id]` | 현재 모델과 사용 가능한 모델을 보거나 모델을 바꿉니다. |
 | `/thinking [단계]` | 사고 수준을 보거나 바꿉니다. |
+
+#### 원격 업데이트 (`/update`, `/reload`)
+
+사용자 설정에 `"remoteUpdate": "all"` 또는 `"self"`를 지정하면 사용할 수 있습니다. 기본값은 `off`입니다.
+
+| 명령 | `all` | `self` |
+| --- | --- | --- |
+| `/update` | 전체 확장 갱신 (`pi update --extensions`) | 이 확장만 갱신 |
+| `/update self` | 이 확장만 갱신 | 이 확장만 갱신 |
+| `/reload` | 확장, 스킬, 프롬프트 다시 불러오기 | 동일 |
+
+1. `/update`를 보내면 실행할 명령을 보여 줍니다. 같은 브라우저에서 60초 안에 `/update confirm`(`/update self`였다면 `/update self confirm`)을 보내야 실행합니다.
+2. 완료 후 `/reload`를 보냅니다. 잠시 연결이 끊겼다가 다시 접속하며, 자동 승인과 페어링은 해제됩니다. 상단의 `ext <버전>`으로 실행 중인 확장 버전을 확인할 수 있습니다.
+
+- 작업 중이거나 `remoteToolPolicy`가 `read-only`, `no-tools`이면 실행하지 않습니다. 셸은 사용하지 않고 정해진 인자만 전달합니다.
+- 프로젝트에 선언된 패키지는 갱신하지 않습니다(`--no-approve`). 버전을 고정한 npm 패키지도 갱신되지 않습니다. `self`는 `npm:@wkqco33/pi-remote-control`로 설치한 경우에 동작합니다.
+- `pi` 본체와 릴레이 서버는 갱신하지 않습니다.
+- **주의:** 갱신된 확장은 `pi` 사용자 권한으로 실행됩니다. `all`은 설치한 모든 서드파티 확장의 새 버전을 받으므로, 릴레이 토큰을 관리할 수 있는 환경에서만 켜세요. 새 버전을 불러오지 못하면 원격 접속이 끊겨 PC에서 직접 복구해야 할 수 있습니다.
 
 확장이 등록한 명령은 원격 도구 정책을 적용할 수 없어 웹에서 실행하지 않습니다. `/new` 같은 그 밖의 `pi` 명령도 지원하지 않습니다. `/`로 시작하는 문장을 그대로 보내려면 `//`로 입력하세요. 웹에 다시 접속하면 템플릿과 스킬은 확장된 내용으로 대화에 표시됩니다.
 

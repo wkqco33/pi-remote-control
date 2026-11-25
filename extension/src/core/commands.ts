@@ -9,7 +9,9 @@ export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhi
 
 export const THINKING_LEVELS: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
-export type BuiltinCommandName = "compact" | "model" | "thinking";
+export type BuiltinCommandName = "compact" | "model" | "thinking" | "update" | "reload";
+
+const MAINTENANCE_COMMANDS: readonly BuiltinCommandName[] = ["update", "reload"];
 
 export interface CommandInfo {
 	readonly name: string;
@@ -27,6 +29,8 @@ export const BUILTIN_COMMANDS: readonly (CatalogCommand & { readonly name: Built
 	{ name: "compact", source: "builtin", description: "Compact the session context [instructions]" },
 	{ name: "model", source: "builtin", description: "Show or change the model [provider/id]" },
 	{ name: "thinking", source: "builtin", description: "Show or change the thinking level [level]" },
+	{ name: "update", source: "builtin", description: "Update pi extensions [self]" },
+	{ name: "reload", source: "builtin", description: "Reload pi extensions, skills, and prompts" },
 ];
 
 export type SlashRoute =
@@ -69,12 +73,13 @@ export function routeSlashInput(text: string, commands: readonly CommandInfo[]):
 	};
 }
 
-export function buildCommandCatalog(commands: readonly CommandInfo[]): CatalogCommand[] {
+export function buildCommandCatalog(commands: readonly CommandInfo[], options: { maintenance?: boolean } = {}): CatalogCommand[] {
 	const expandable = commands.flatMap((command): CatalogCommand[] => {
 		if (command.source === "extension") return [];
 		// Hide names that routing would reject or handle as a built-in.
 		if (routeSlashInput(`/${command.name}`, commands).kind !== "expand") return [];
 		return [{ name: command.name, source: command.source, ...(command.description ? { description: command.description } : {}) }];
 	});
-	return [...BUILTIN_COMMANDS, ...expandable];
+	const builtins = BUILTIN_COMMANDS.filter((command) => options.maintenance || !MAINTENANCE_COMMANDS.includes(command.name));
+	return [...builtins, ...expandable];
 }

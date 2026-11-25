@@ -3,7 +3,7 @@ import { DEFAULT_REMOTE_CONFIG } from "../config.js";
 import type { WireEnvelope } from "../core/protocol.js";
 import { RemoteBridge, type RemoteHost, type TransportSink } from "./remote-bridge.js";
 
-function makeHarness(requirePairing = true) {
+function makeHarness(requirePairing = true, remoteUpdate: "off" | "self" | "all" = "off") {
 	const sent: WireEnvelope[] = [];
 	const notices: string[] = [];
 	const prompts: Array<{ text: string; deliverAs?: string; expand?: boolean }> = [];
@@ -37,6 +37,11 @@ function makeHarness(requirePairing = true) {
 		getThinkingLevel: () => "low",
 		setThinkingLevel: (level) => void calls.push(`thinking ${level}`),
 		compact: async (instructions) => void calls.push(`compact ${instructions ?? ""}`),
+		runPiUpdate: async (args) => {
+			calls.push(`pi ${args.join(" ")}`);
+			return { code: 0, output: "updated sk-ant-api03-1234567890abcdef" };
+		},
+		reload: () => void calls.push("reload"),
 		abort: vi.fn(),
 		notify: (text) => notices.push(text),
 		getHistory: () => [{ role: "user", text: "hi" }],
@@ -45,7 +50,7 @@ function makeHarness(requirePairing = true) {
 		random: () => randSeq[idx++ % randSeq.length] ?? 0,
 	};
 	const bridge = new RemoteBridge({
-		config: { ...DEFAULT_REMOTE_CONFIG, requirePairing, approvalTimeoutMs: 5000 },
+		config: { ...DEFAULT_REMOTE_CONFIG, requirePairing, remoteUpdate, approvalTimeoutMs: 5000 },
 		host,
 		sink,
 	});
@@ -151,6 +156,18 @@ describe("RemoteBridge", () => {
 		expect(sent[0]).toMatchObject({ type: "commands.snapshot", clientId: "web-1", payload: { models: ["acme/small"] } });
 		expect(JSON.stringify(sent[0])).toContain("[redacted:anthropic-key]");
 		expect(JSON.stringify(sent[0])).not.toContain('"remote"');
+	});
+
+	it("runs update and reload from the web only when enabled", async () => {
+		for (const remoteUpdate of ["off", "all"] as const) {
+			const { bridge, sent, calls, prompts } = makeHarness(false, remoteUpdate);
+			for (const text of ["/update", "/update confirm", "/reload"]) {
+				await bridge.handleServerMessage({ type: "prompt.send", clientId: "web-1", text });
+			}
+			expect(calls).toEqual(remoteUpdate === "off" ? [] : ["pi update --extensions --no-approve", "reload"]);
+			expect(prompts).toEqual([]);
+			expect(JSON.stringify(sent)).not.toContain("1234567890abcdef");
+		}
 	});
 
 	it("coalesces stream deltas and keeps them ahead of later frames", () => {

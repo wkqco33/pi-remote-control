@@ -16,6 +16,8 @@ export interface RemoteControlConfig {
 	readonly remoteToolPolicy: RemoteToolPolicy;
 	readonly remoteToolApproval: RemoteToolApproval;
 	readonly approvalTimeoutMs: number;
+	/** Which extensions `/update` may update. Any value but "off" also allows `/reload`. */
+	readonly remoteUpdate: "off" | "self" | "all";
 	readonly maxImageBytes: number;
 	readonly maxImages: number;
 	readonly reconnectBaseMs: number;
@@ -32,6 +34,7 @@ export const DEFAULT_REMOTE_CONFIG: RemoteControlConfig = {
 	remoteToolPolicy: "unrestricted",
 	remoteToolApproval: "off",
 	approvalTimeoutMs: 60_000,
+	remoteUpdate: "off",
 	maxImageBytes: 8 * 1024 * 1024,
 	maxImages: 4,
 	reconnectBaseMs: 1_000,
@@ -71,6 +74,9 @@ export function parseRemoteConfig(raw: unknown): ParsedConfigResult {
 	}
 	if (obj.remoteToolApproval === "off" || obj.remoteToolApproval === "local" || obj.remoteToolApproval === "web") {
 		out.remoteToolApproval = obj.remoteToolApproval;
+	}
+	if (obj.remoteUpdate === "off" || obj.remoteUpdate === "self" || obj.remoteUpdate === "all") {
+		out.remoteUpdate = obj.remoteUpdate;
 	}
 	if (typeof obj.approvalTimeoutMs === "number" && obj.approvalTimeoutMs >= 5_000 && obj.approvalTimeoutMs <= 300_000) {
 		out.approvalTimeoutMs = obj.approvalTimeoutMs;

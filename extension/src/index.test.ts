@@ -19,7 +19,7 @@ describe("remoteControlExtension wiring", () => {
 		} as unknown as ExtensionAPI;
 
 		await remoteControlExtension(fakePi);
-		expect(commands).toEqual(["remote"]);
+		expect(commands).toEqual(["remote", "remote-reload"]);
 		expect(events).toContain("session_start");
 		expect(events).toContain("session_shutdown");
 		expect(events).toContain("message_update");

@@ -48,7 +48,9 @@ function runThinking(host: BuiltinHost, level: string): CommandResult {
 	return success(applied === next ? `Thinking level set to ${applied}.` : `Thinking level set to ${applied}; this model does not support ${next}.`);
 }
 
-export async function runBuiltinCommand(host: BuiltinHost, name: BuiltinCommandName, args: string): Promise<CommandResult> {
+export type SessionCommandName = Exclude<BuiltinCommandName, "update" | "reload">;
+
+export async function runBuiltinCommand(host: BuiltinHost, name: SessionCommandName, args: string): Promise<CommandResult> {
 	try {
 		if (name === "model") return await runModel(host, args);
 		if (name === "thinking") return runThinking(host, args);

@@ -11,9 +11,10 @@ import { redactSecrets } from "../core/redact.js";
 import type { ApprovalReason } from "../core/tool-policy.js";
 import type { ConnectionStatus, StatusSnapshot } from "../core/status.js";
 import type { BuiltinHost } from "./command-handler.js";
+import type { MaintenanceHost } from "./maintenance.js";
 import { PromptRouter } from "./prompt-router.js";
 
-export interface RemoteHost extends BuiltinHost {
+export interface RemoteHost extends BuiltinHost, MaintenanceHost {
 	readonly sessionId: string;
 	readonly sessionName?: string;
 	readonly host: string;
@@ -183,7 +184,7 @@ export class RemoteBridge {
 				return;
 			case "prompt.send":
 				if (!this.ensureTrusted(msg.clientId)) return;
-				await this.prompts.submit(msg.text, msg.deliverAs, msg.images);
+				await this.prompts.submit(msg.clientId, msg.text, msg.deliverAs, msg.images);
 				return;
 			case "commands.request":
 				if (!this.ensureTrusted(msg.clientId)) return;

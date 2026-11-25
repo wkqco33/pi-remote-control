@@ -10,9 +10,10 @@ describe("applyProjectConfig", () => {
 			serverUrl: "wss://other.example/ws/agent",
 			tokenEnv: "OTHER_SECRET",
 			tokenFile: "~/.ssh/id_ed25519",
+			remoteUpdate: "all",
 		});
 		expect(config).toEqual(user);
-		expect(ignored).toEqual(["serverUrl", "tokenEnv", "tokenFile"]);
+		expect(ignored).toEqual(["serverUrl", "tokenEnv", "tokenFile", "remoteUpdate"]);
 	});
 
 	it("ignores values that would weaken the user's protection", () => {
